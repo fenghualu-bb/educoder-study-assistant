@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "runId": "synthetic-portable-upgrade",
+  "courseUrl": "https://www.educoder.net/classrooms/demo123/video",
+  "mode": "trial",
+  "limits": { "maxVideos": 1, "maxPages": 1 },
+  "phase": "stopped",
+  "layout": [
+    { "page": 1, "index": 0, "title": "已完成演示" },
+    { "page": 1, "index": 1, "title": "未完成演示" }
+  ],
+  "events": [
+    { "type": "verified", "at": "2026-09-25T00:00:00.000Z", "page": 1, "index": 0, "title": "已完成演示" },
+    { "type": "stopped", "at": "2026-09-25T00:00:01.000Z", "page": 1, "index": 1, "title": "未完成演示", "code": "STOPPED" }
+  ],
+  "updatedAt": "2026-09-25T00:00:01.000Z"
+}

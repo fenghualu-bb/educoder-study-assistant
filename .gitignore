@@ -1,0 +1,10 @@
+node_modules/
+data/
+vendor/
+out/
+.private-quarantine/
+backup-*.zip
+packager-tmp/
+*.exe
+*.zip
+.env

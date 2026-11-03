@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>头歌学习助手 · 0.1.14 候选版</title>
+  <link rel="stylesheet" href="/theme.css">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/theme.js" defer></script>
+  <script src="/app.js" defer></script>
+  <script type="module" src="/personal-home.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">▦</span>
+        <div>
+          <div class="eyebrow">头歌学习助手</div>
+          <h1>学习工作台</h1>
+        </div>
+      </div>
+      <div class="header-tools">
+        <span class="local-badge">本地手动</span>
+        <span id="app-version" class="version-badge">0.1.14 候选版</span>
+        <label class="theme-control" for="appearance-mode"><span>主题</span><select id="appearance-mode"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
+      </div>
+    </header>
+    <p id="app-intro" class="intro">在地图上点视频播放；选多条可连续播放所选。</p>
+    <p id="local-connection" class="connection-notice" role="status" aria-live="polite" hidden></p>
+
+    <div class="workspace">
+      <aside class="workspace-sidebar" aria-label="课堂操作">
+        <section class="panel classroom-panel" aria-labelledby="setup-title">
+          <div class="classroom-main-row">
+            <div class="classroom-label"><span class="step-number" aria-hidden="true">1</span><h2 id="setup-title">选择课堂</h2></div>
+            <select id="classroom-select" aria-label="我的课堂" hidden><option value="">请选择已加入的课堂</option></select>
+            <span id="classroom-current" class="classroom-current" aria-label="当前课堂" hidden></span>
+            <div class="classroom-direct-actions">
+              <button id="open" type="button" class="button secondary" aria-label="打开官方登录窗口"><span class="control-full-name">打开官方登录窗口</span><span class="control-short-name" aria-hidden="true">登录</span></button>
+              <button id="load-classrooms" type="button" class="button secondary" aria-label="读取我的课堂"><span class="control-full-name">读取我的课堂</span><span class="control-short-name" aria-hidden="true">读课堂</span></button>
+              <button id="scan" type="button" class="button secondary" aria-label="刷新官方进度"><span class="control-full-name">刷新官方进度</span><span class="control-short-name" aria-hidden="true">刷新进度</span></button>
+              <button id="stop" type="button" class="button ghost" hidden>停止扫描</button>
+            </div>
+          </div>
+          <p id="browser-instruction" class="panel-description">在头歌专用浏览器自行登录，再读取“我的课堂”。选择课堂后只读扫描，不播放视频。</p>
+          <details id="classroom-tools" class="classroom-tools"><summary>手动填写课堂链接</summary>
+            <label for="classroom-url">课堂链接</label><input id="classroom-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://www.educoder.net/classrooms/…/video">
+          </details>
+          <p id="form-error" class="form-error" role="alert" hidden></p>
+          <p id="error" class="error" role="alert" hidden></p><button id="copy-diagnostic" type="button" class="diagnostic-copy" hidden>复制脱敏诊断摘要</button>
+          <div id="course-mismatch" class="course-mismatch" hidden><p id="mismatch-text"></p><button id="use-snapshot-course" type="button">返回上次扫描的课堂</button></div>
+        </section>
+
+        <details id="trial-details" class="panel trial-panel" hidden>
+          <summary>视频试运行 <span>受限试运行 · 单次最多 3 条</span></summary>
+          <p class="hint">这会实际打开并播放视频。单次最多 3 条，范围最多连续 2 页；每条仍须由头歌确认 100% 才继续。网络不稳定时请暂勿启动。</p>
+          <label for="trial-page">从哪一页开始</label>
+          <select id="trial-page"><option value="1">第 1 页</option></select>
+          <label for="trial-pages">本次页面范围</label>
+          <select id="trial-pages">
+            <option value="1" selected>只在所选页</option>
+            <option value="2" disabled>所选页及下一页（仍最多 3 条）</option>
+          </select>
+          <label for="trial-count">单次试运行数量</label>
+          <select id="trial-count">
+            <option value="1" selected>1 条（推荐）</option>
+            <option value="2">2 条</option>
+            <option value="3">3 条</option>
+          </select>
+          <button id="start" type="button" class="button trial-start" disabled>开始试运行</button>
+        </details>
+        <section id="service-notice" class="local-mode-notice" aria-labelledby="service-notice-title" hidden>
+          <h2 id="service-notice-title">本地手动模式可用</h2>
+          <p>登录头歌并扫描课堂后，在热力图上选择视频观看。</p>
+        </section>
+      </aside>
+
+      <div class="workspace-content">
+        <section class="panel inventory-panel" aria-labelledby="inventory-heading">
+          <div class="inventory-header">
+            <div><h2 id="inventory-heading">课堂视频</h2><p id="map-instruction" class="inventory-intro">点击方格播放视频；悬停或聚焦查看标题与官方进度。</p></div>
+            <button id="batch-select" type="button" class="button secondary" disabled>选多条连续播放</button>
+          </div>
+          <section id="playback-workspace" class="playback-workspace" aria-label="本次播放">
+            <div id="now-playing" class="now-playing" hidden>
+              <div class="playback-heading"><h3>本次播放</h3><span id="playback-state" class="playback-state" role="status">未播放</span></div>
+              <div class="playing-titles"><div><p id="current-label">当前视频</p><h3 id="current-title"></h3></div><div><p>下一条</p><strong id="next-title"></strong></div></div>
+              <div class="playback-metrics"><div><span>当前播放位置</span><strong id="playback-current">—</strong><small id="playback-duration"></small></div><div><span>官网保存进度</span><strong id="playback-percent">—</strong><small>官方列表读数</small></div><div><span>本机可恢复位置</span><strong id="playback-resume">—</strong><small>实际播放观察</small></div></div>
+              <div class="playback-actions"><button id="home-continue" type="button" class="button primary" disabled>暂停播放</button><button id="playback-stop" type="button" class="button secondary">结束本次</button><button id="playback-official" type="button" class="button ghost">查看官方播放窗口</button><button id="playback-restart" type="button" class="button ghost">当前视频从头播放</button><button id="playback-discard" type="button" class="button ghost" hidden>放弃未保存位置并结束</button></div>
+            </div>
+            <div id="replacement-confirm" class="replacement-confirm" role="group" aria-label="更换正在播放的内容" hidden><p id="replacement-description"></p><div><button id="replacement-start" type="button" class="button primary">保存并播放</button><button id="replacement-cancel" type="button" class="button secondary">保留当前播放</button></div></div>
+            <div id="resume-last" class="resume-last" hidden><p id="resume-last-description"></p><div><button id="resume-last-play" type="button" class="button secondary">继续上次播放</button><button id="resume-last-retry" type="button" class="button ghost" hidden>重试读取上次记录</button></div></div>
+            <p id="completion-summary" class="completion-summary" role="status" hidden></p>
+            <p id="home-viewing-state" class="playback-message" role="status" aria-live="polite"></p>
+            <button id="start-retry" type="button" class="button secondary" hidden>重试播放</button>
+            <button id="start-beginning-retry" type="button" class="button secondary" hidden>这条从头播放</button>
+          </section>
+          <div id="selection-area" class="selection-area" hidden>
+            <div class="selection-heading"><h3 id="home-title">选择本次连续播放的视频</h3><span id="selection-count" class="selection-count" role="status">已选 0 条</span><button id="selection-clear" type="button" class="button ghost" disabled>清空选择</button></div>
+            <div class="batch-actions"><button id="batch-start" type="button" class="button primary" disabled>连续播放所选（0条）</button><button id="selection-cancel" type="button" class="button secondary">取消选择</button><label><input id="start-from-beginning" type="checkbox">本次从头播放</label><span id="start-point">优先继续各视频本机位置</span></div>
+            <p id="home-subtitle" class="selection-instruction">点方格加入或移除；编号就是本次播放顺序。</p>
+            <ol id="selected-preview" class="selected-preview" aria-label="本次所选视频"></ol>
+          </div>
+          <div id="inventory-empty" class="inventory-empty"><span class="empty-mark" aria-hidden="true">▤</span><div><strong>先选择你的课堂</strong><p>自行登录官方窗口后读取课堂；选择课堂会只读扫描视频。</p></div></div>
+          <div id="inventory-content" hidden>
+            <div class="inventory-overview"><div class="overview-top"><div><p class="overview-label">当前课堂</p><h3 id="inventory-title">—</h3><p id="inventory-updated" class="overview-updated">—</p></div><span id="inventory-scope" class="scope-badge">全课程视频</span></div>
+              <div class="completion-line" hidden><div><span id="inventory-completed">0</span><span class="completion-divider"> / </span><span id="inventory-total">0</span><span class="completion-caption"> 条已完成</span></div><span id="inventory-rate">0%</span></div>
+              <progress hidden id="inventory-progress" max="100" value="0" aria-label="已扫描视频完成率"></progress><div class="overview-stats" hidden><div><span>还需观看</span><strong id="inventory-pending">0</strong></div><div><span>已完成</span><strong id="inventory-done">0</strong></div><div><span>已扫描页</span><strong id="inventory-pages">0</strong></div></div>
+            </div>
+            <p id="inventory-warning" class="inventory-warning" role="status" hidden></p>
+            <section class="heatmap-section" aria-labelledby="heatmap-heading"><div class="heatmap-head"><div><h3 id="heatmap-heading">官方完成度</h3><p>每行一页，每格一条视频。</p></div><div class="heatmap-legend" aria-label="颜色由浅到深表示官方完成度增加"><span>0%</span><i class="heatmap-legend-scale" aria-hidden="true"></i><span>100%</span><span class="legend-unknown"><i class="heatmap-legend-unknown" aria-hidden="true">?</i> 待确认</span></div></div>
+              <div class="heatmap-scroll"><div id="heatmap-grid" class="heatmap-grid" aria-label="课程视频完成度方格图"></div></div><div id="heatmap-tooltip" class="heatmap-tooltip" role="tooltip" hidden><strong id="heatmap-tooltip-title"></strong><span id="heatmap-tooltip-meta"></span></div>
+            </section>
+          </div>
+          <div class="home-truth-strip"><div id="home-metrics" class="home-metrics"></div><p id="home-source">官网完成度与本机观看位置分开显示</p></div>
+          <div class="playback-options" aria-label="播放设置"><label><input id="auto-mute" type="checkbox">自动静音</label><label><input id="speed-enabled" type="checkbox">官方倍速</label><select id="speed-value" aria-label="官方支持的播放速度" disabled><option value="1.5">1.5x（待核对）</option></select><span id="options-state">只使用官网提供的控件</span></div><p id="options-hint" class="hint" role="status"></p>
+        </section>
+        <details class="panel status" aria-labelledby="status-title">
+          <summary>课堂读取状态</summary>
+          <h2 id="status-title">任务状态</h2>
+          <div id="phase" class="phase" role="status" aria-live="polite">等待打开头歌</div>
+          <div class="grid">
+            <div><span id="page-label" class="label">页码</span><strong id="page">—</strong></div>
+            <div><span id="completed-label" class="label">已核验完成</span><strong id="completed">0</strong></div>
+            <div><span id="time-label" class="label">观看进度</span><strong id="time">—</strong></div>
+          </div>
+          <p id="video" class="video">尚未选择视频</p>
+        </details>
+
+      </div>
+    </div>
+  </main>
+</body>
+</html>

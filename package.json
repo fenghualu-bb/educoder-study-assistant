@@ -1,0 +1,33 @@
+{
+  "name": "educoder-local-study-control",
+  "version": "0.1.19",
+  "description": "头歌（EduCoder）课堂视频进度查看与本机观看助手：只读扫描官方进度、热力图展示、通过官方播放器控件观看所选视频。",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fenghualu-bb/educoder-study-assistant.git"
+  },
+  "private": true,
+  "type": "module",
+  "main": "src/desktop-main.js",
+  "scripts": {
+    "test": "node --test",
+    "start": "node src/main.js",
+    "desktop:start": "electron .",
+    "stage-browser": "node scripts/stage-browser.mjs",
+    "desktop:package": "electron-forge package",
+    "desktop:audit": "node scripts/audit-package.mjs",
+    "desktop:installer": "node scripts/build-candidate.mjs",
+    "desktop:verify": "node scripts/verify-package-source.mjs out/edge-candidate-0.1.19/educoder-local-study-control-win32-x64"
+  },
+  "dependencies": {
+    "playwright-core": "1.63.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.11.2",
+    "electron": "^44.4.5"
+  }
+}

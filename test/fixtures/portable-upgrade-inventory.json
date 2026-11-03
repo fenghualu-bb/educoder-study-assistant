@@ -1,0 +1,11 @@
+{
+  "courseUrl": "https://www.educoder.net/classrooms/demo123/video",
+  "courseTitle": "模拟课堂（仅测试）",
+  "scannedAt": "2026-09-25T00:00:00.000Z",
+  "pagesScanned": 1,
+  "complete": true,
+  "items": [
+    { "page": 1, "index": 0, "title": "已完成演示", "progress": 100 },
+    { "page": 1, "index": 1, "title": "未完成演示", "progress": 37 }
+  ]
+}
