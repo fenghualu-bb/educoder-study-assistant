@@ -6,6 +6,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -99,23 +100,49 @@ internal static class CandidateInstaller
         }
         return directory;
     }
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046"), ClassInterface(ClassInterfaceType.None)]
+    class ShellLink { }
+
+    // Method order follows the Windows SDK's IShellLinkW interface.
+    [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IShellLinkW
+    {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int length, IntPtr findData, uint flags);
+        void GetIDList(out IntPtr idList);
+        void SetIDList(IntPtr idList);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder description, int length);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string description);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder directory, int length);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string directory);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder arguments, int length);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string arguments);
+        void GetHotkey(out ushort hotkey);
+        void SetHotkey(ushort hotkey);
+        void GetShowCmd(out int mode);
+        void SetShowCmd(int mode);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int length, out int index);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string path, int index);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string path, uint reserved);
+        void Resolve(IntPtr owner, uint flags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string path);
+    }
+
     static void Shortcut(string folder, string installDir)
     {
-        object shell = null, link = null;
+        string temporary = Path.Combine(folder, ".educoder-shortcut-" + Guid.NewGuid().ToString("N") + ".lnk");
+        IShellLinkW link = (IShellLinkW)new ShellLink();
         try
         {
-            shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
-            link = shell.GetType().InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { Path.Combine(folder, ShortcutName) });
-            Type type = link.GetType();
-            type.InvokeMember("TargetPath", BindingFlags.SetProperty, null, link, new object[] { Path.Combine(installDir, AppExe) });
-            type.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, link, new object[] { installDir });
-            type.InvokeMember("Description", BindingFlags.SetProperty, null, link, new object[] { "头歌视频学习进度助手 · 本地候选版" });
-            type.InvokeMember("Save", BindingFlags.InvokeMethod, null, link, null);
+            link.SetPath(Path.Combine(installDir, AppExe));
+            link.SetWorkingDirectory(installDir);
+            link.SetDescription("头歌学习进度助手");
+            ((IPersistFile)link).Save(temporary, false);
+            File.Move(temporary, Path.Combine(folder, ShortcutName));
         }
         finally
         {
-            if (link != null) Marshal.FinalReleaseComObject(link);
-            if (shell != null) Marshal.FinalReleaseComObject(shell);
+            Marshal.FinalReleaseComObject(link);
+            if (File.Exists(temporary)) File.Delete(temporary);
         }
     }
     static void Install(string inputDir, string inputShortcuts)
@@ -222,7 +249,11 @@ internal static class CandidateInstaller
         }
         catch (Exception error)
         {
-            if (silent || verify) Console.Error.WriteLine(error.GetType().Name + ": " + error.Message);
+            if (silent || verify)
+            {
+                Exception cause = error.GetBaseException();
+                Console.Error.WriteLine(cause.GetType().Name + ": " + cause.Message);
+            }
             else MessageBox.Show(error is InvalidDataException ? error.Message : "无法完成安装，请联系维护者并保留安装包。", "安装未完成", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 2;
         }
