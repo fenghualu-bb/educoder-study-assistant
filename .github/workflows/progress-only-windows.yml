@@ -48,37 +48,8 @@ jobs:
 
           $shortcut = Get-ChildItem $shortcutDir -Filter *.lnk | Select-Object -First 1
           if (-not $shortcut) { throw 'Installed shortcut is missing' }
-          $applicationPath = Join-Path $installDir 'educoder-local-study-control.exe'
-          Start-Process -FilePath $shortcut.FullName
-          $app = $null
-          try {
-            $started = $false
-            $deadline = (Get-Date).AddSeconds(45)
-            while ((Get-Date) -lt $deadline) {
-              $app = Get-Process -Name 'educoder-local-study-control' -ErrorAction SilentlyContinue |
-                Where-Object { $_.Path -eq $applicationPath } | Select-Object -First 1
-              $listeners = @()
-              if ($app) { $listeners = Get-NetTCPConnection -OwningProcess $app.Id -State Listen -ErrorAction SilentlyContinue }
-              foreach ($listener in $listeners) {
-                if ($listener.LocalAddress -ne '127.0.0.1') { continue }
-                $origin = "http://127.0.0.1:$($listener.LocalPort)"
-                try {
-                  $bootstrap = Invoke-RestMethod "$origin/api/bootstrap" -TimeoutSec 2
-                  $page = Invoke-WebRequest "$origin/" -TimeoutSec 2
-                  if ($bootstrap.desktopMode -and $page.Content -match '0\.2\.0' -and $page.Content -match 'id="heatmap-grid"') {
-                    $started = $true
-                    break
-                  }
-                } catch { }
-              }
-              if ($started) { break }
-              Start-Sleep -Milliseconds 500
-            }
-            if (-not $started) { throw 'Installed desktop app did not start its local workbench' }
-            Write-Host 'Installed desktop shortcut started the Windows app and its 0.2.0 workbench.'
-          } finally {
-            if ($app -and -not $app.HasExited) { Stop-Process -Id $app.Id }
-          }
+          node scripts/smoke-installed-startup.mjs (Join-Path $installDir 'educoder-local-study-control.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Windows app did not open its workbench' }
 
           "$sha256  $($installer.Name)" | Set-Content out/installers/SHA256SUMS.txt -Encoding ascii
           Write-Host "Installer SHA256 $sha256"
