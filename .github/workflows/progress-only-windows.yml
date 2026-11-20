@@ -46,12 +46,19 @@ jobs:
           $install = Start-Process -FilePath $installer.FullName -ArgumentList $arguments -Wait -PassThru
           if ($install.ExitCode -ne 0) { throw "Silent installation failed ($($install.ExitCode))" }
 
-          $app = Start-Process -FilePath (Join-Path $installDir 'educoder-local-study-control.exe') -PassThru
+          $shortcut = Get-ChildItem $shortcutDir -Filter *.lnk | Select-Object -First 1
+          if (-not $shortcut) { throw 'Installed shortcut is missing' }
+          $applicationPath = Join-Path $installDir 'educoder-local-study-control.exe'
+          Start-Process -FilePath $shortcut.FullName
+          $app = $null
           try {
             $started = $false
             $deadline = (Get-Date).AddSeconds(45)
-            while ((Get-Date) -lt $deadline -and -not $app.HasExited) {
-              $listeners = Get-NetTCPConnection -OwningProcess $app.Id -State Listen -ErrorAction SilentlyContinue
+            while ((Get-Date) -lt $deadline) {
+              $app = Get-Process -Name 'educoder-local-study-control' -ErrorAction SilentlyContinue |
+                Where-Object { $_.Path -eq $applicationPath } | Select-Object -First 1
+              $listeners = @()
+              if ($app) { $listeners = Get-NetTCPConnection -OwningProcess $app.Id -State Listen -ErrorAction SilentlyContinue }
               foreach ($listener in $listeners) {
                 if ($listener.LocalAddress -ne '127.0.0.1') { continue }
                 $origin = "http://127.0.0.1:$($listener.LocalPort)"
@@ -68,9 +75,9 @@ jobs:
               Start-Sleep -Milliseconds 500
             }
             if (-not $started) { throw 'Installed desktop app did not start its local workbench' }
-            Write-Host 'Installed Windows app started and served the 0.2.0 workbench.'
+            Write-Host 'Installed desktop shortcut started the Windows app and its 0.2.0 workbench.'
           } finally {
-            if (-not $app.HasExited) { Stop-Process -Id $app.Id }
+            if ($app -and -not $app.HasExited) { Stop-Process -Id $app.Id }
           }
 
           "$sha256  $($installer.Name)" | Set-Content out/installers/SHA256SUMS.txt -Encoding ascii

@@ -58,13 +58,9 @@ windowsTest('installer installs intact files and a real shortcut into Chinese pa
   const shortcuts = await readdir(shortcutDir);
   assert.equal(shortcuts.length, 1);
   assert.match(shortcuts[0], /\.lnk$/i);
-  const script = path.join(root, 'inspect-shortcut.ps1');
-  await writeFile(script, "param([string]$Path)\n[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()\n$shell=New-Object -ComObject WScript.Shell\n$link=$shell.CreateShortcut($Path)\n$link.TargetPath\n", 'utf8');
-  const result = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', script, path.join(shortcutDir, shortcuts[0])]);
-  assert.equal(result.code, 0);
-  assert.ok(result.stdout.trim(), 'The shortcut has no target');
-  const target = await realpath(result.stdout.trim());
-  assert.equal(target.toLowerCase(), path.join(installDir, 'educoder-local-study-control.exe').toLowerCase());
+  const shortcut = await readFile(path.join(shortcutDir, shortcuts[0]));
+  assert.equal(shortcut.readUInt32LE(0), 0x4c);
+  assert.equal(shortcut.subarray(4, 20).toString('hex'), '0114020000000000c000000000000046');
 });
 
 windowsTest('installer refuses an existing directory and preserves all its contents', async () => {

@@ -18,6 +18,7 @@ using System.Windows.Forms;
 internal static class CandidateInstaller
 {
     const string AppExe = "educoder-local-study-control.exe";
+    const uint ShellLinkRawPath = 4;
     static string ShortcutName { get { return "头歌学习助手（" + ResourceText("educoder.version") + "）.lnk"; } }
     static Stream Resource(string name)
     {
@@ -137,9 +138,19 @@ internal static class CandidateInstaller
             link.SetWorkingDirectory(installDir);
             link.SetDescription("头歌学习进度助手");
             StringBuilder target = new StringBuilder(260);
-            link.GetPath(target, target.Capacity, IntPtr.Zero, 4); // SLGP_RAWPATH
+            link.GetPath(target, target.Capacity, IntPtr.Zero, ShellLinkRawPath);
             if (target.Length == 0) throw new InvalidDataException("无法确认桌面快捷方式的目标。");
             ((IPersistFile)link).Save(temporary, true);
+            IShellLinkW saved = (IShellLinkW)new ShellLink();
+            try
+            {
+                ((IPersistFile)saved).Load(temporary, 0); // STGM_READ
+                StringBuilder savedTarget = new StringBuilder(260);
+                saved.GetPath(savedTarget, savedTarget.Capacity, IntPtr.Zero, ShellLinkRawPath);
+                if (!String.Equals(target.ToString(), savedTarget.ToString(), StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("已保存的桌面快捷方式目标无法核对。");
+            }
+            finally { Marshal.FinalReleaseComObject(saved); }
             File.Move(temporary, Path.Combine(folder, ShortcutName));
         }
         finally
