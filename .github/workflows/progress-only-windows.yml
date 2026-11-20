@@ -1,0 +1,82 @@
+name: Progress-only Windows installer
+
+on:
+  push:
+    branches: [progress-only]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install dependencies
+        run: |
+          git config --global url.https://github.com/.insteadOf ssh://git@github.com/
+          npm ci --no-audit --no-fund
+      - name: Test
+        run: npm test -- --test-concurrency=2 --test-timeout=60000
+      - name: Build Windows installer
+        run: npm run desktop:installer
+      - name: Verify and start an isolated installation
+        run: |
+          $installer = Get-ChildItem out/installers -Filter *.exe | Select-Object -First 1
+          if (-not $installer) { throw 'Installer is missing' }
+          $manifest = Get-Content "$($installer.FullName).json" -Raw | ConvertFrom-Json
+          $sha256 = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha256 -ne $manifest.installerSha256) { throw 'Installer hash differs from build manifest' }
+
+          $verify = Start-Process -FilePath $installer.FullName -ArgumentList '--verify-only' -Wait -PassThru
+          if ($verify.ExitCode -ne 0) { throw "Installer verification failed ($($verify.ExitCode))" }
+
+          $installDir = Join-Path $env:RUNNER_TEMP 'progress-only-install'
+          $shortcutDir = Join-Path $env:RUNNER_TEMP 'progress-only-shortcuts'
+          $arguments = "--silent --install-dir `"$installDir`" --shortcut-dir `"$shortcutDir`""
+          $install = Start-Process -FilePath $installer.FullName -ArgumentList $arguments -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Silent installation failed ($($install.ExitCode))" }
+
+          $app = Start-Process -FilePath (Join-Path $installDir 'educoder-local-study-control.exe') -PassThru
+          try {
+            $started = $false
+            $deadline = (Get-Date).AddSeconds(45)
+            while ((Get-Date) -lt $deadline -and -not $app.HasExited) {
+              $listeners = Get-NetTCPConnection -OwningProcess $app.Id -State Listen -ErrorAction SilentlyContinue
+              foreach ($listener in $listeners) {
+                if ($listener.LocalAddress -ne '127.0.0.1') { continue }
+                $origin = "http://127.0.0.1:$($listener.LocalPort)"
+                try {
+                  $bootstrap = Invoke-RestMethod "$origin/api/bootstrap" -TimeoutSec 2
+                  $page = Invoke-WebRequest "$origin/" -TimeoutSec 2
+                  if ($bootstrap.desktopMode -and $page.Content -match '0\.2\.0' -and $page.Content -match 'id="heatmap-grid"') {
+                    $started = $true
+                    break
+                  }
+                } catch { }
+              }
+              if ($started) { break }
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $started) { throw 'Installed desktop app did not start its local workbench' }
+            Write-Host 'Installed Windows app started and served the 0.2.0 workbench.'
+          } finally {
+            if (-not $app.HasExited) { Stop-Process -Id $app.Id }
+          }
+
+          "$sha256  $($installer.Name)" | Set-Content out/installers/SHA256SUMS.txt -Encoding ascii
+          Write-Host "Installer SHA256 $sha256"
+      - name: Upload verified installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: progress-only-0.2.0-windows-x64
+          path: out/installers/*
+          if-no-files-found: error
+          compression-level: 0
