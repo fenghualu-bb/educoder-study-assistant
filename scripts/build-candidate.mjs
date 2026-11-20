@@ -8,6 +8,8 @@ import { verifyPackageSource } from './verify-package-source.mjs';
 import { buildWindowsInstaller } from './build-windows-installer.mjs';
 import { smokePackagedStartup } from './smoke-packaged-startup.mjs';
 
+if (process.platform !== 'win32') throw new Error('WINDOWS_BUILD_REQUIRED');
+
 const root = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(import.meta.url);
 const forgePackage = require.resolve('@electron-forge/cli/package.json');
@@ -30,20 +32,9 @@ const outputFile = path.join(root, 'out', 'installers', `educoder-study-assistan
 const installer = await buildWindowsInstaller({ packageDir, outputFile, version });
 const result = { version, installer: path.basename(outputFile), installerSha256: installer.installerSha256,
   payloadSha256: installer.payloadSha256, browser: 'system Microsoft Edge',
-  playbackEnabled: false,
-  manualWorkspace: { singleAssistantWindow: true, embeddedPlayControls: true, directMapClickStartsSingle: true,
-    persistentSelectionModes: false, transientOrderedBatchSelection: true, completionReleasesSession: true,
-    primaryStartRequiresUserAction: true, resumeRequiresUserAction: true },
-  playbackRecovery: { recoverableNoProgressRetries: true, retryAttemptLimit: null, retryDelayCapMs: 30000,
-    transientNetworkAndMediaReadinessRetries: true, verifiedSameOriginPageResetRecovery: true,
-    freshOfficialControlsRequired: true, unavailableSavedRestoreUsesActualOfficialPosition: true,
-    explicitBeginningNeverFallsBack: true, intermediateOfficialSessionPreserved: true,
-    completedSaveRetryNeverReplays: true, finalRecordConflictCheck: true,
-    officialControlsOnly: true, userCancellationStopsRetries: true, websitePauseRespected: true,
-    authenticationAndExplicitErrorsRequireUser: true, simulatedValidationOnly: true },
-  localManualViewing: { available: true, scope: 'one user-selected scanned video', requiresUserAction: true,
-    autoplayEnabled: false, perClassroomVideoPositions: true, legacyPositionReadOnlyMigration: true },
-  personalTemporaryQueue: { available: true, enabledByDefault: false, userSelectedScannedVideos: true, startRequiresUserAction: true, realEndedAndOfficial100Required: true, autoResume: false },
+  localManualViewing: { available: true, scope: 'one user-selected scanned video',
+    requiresUserAction: true, autoplayEnabled: false, perClassroomVideoPositions: true,
+    legacyPositionReadOnlyMigration: true },
   privacy, source, startupSmoke, installedFiles: installer.files };
 await writeFile(`${outputFile}.json`, JSON.stringify(result, null, 2) + '\n');
 console.log(`Installer ready: ${path.basename(outputFile)}; SHA256 ${installer.installerSha256}`);

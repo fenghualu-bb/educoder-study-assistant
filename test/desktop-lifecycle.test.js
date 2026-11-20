@@ -76,14 +76,13 @@ test('desktop attaches an isolated preload before loading its workbench', async 
   assert.equal(registered.getRuntime().origin, 'http://127.0.0.1:52001');
 });
 
-test('desktop keeps the legacy runner disabled in its local runtime', async () => {
+test('desktop gives its local runtime a per-launch CSRF token', async () => {
   let received;
   const f = fixture({ startRuntime: async options => {
     received = options;
     return { origin: 'http://127.0.0.1:52001' };
   } });
   await runDesktop({ ...f, resourcesPath: 'C:\\Electron\\resources', projectRoot: 'C:\\project' });
-  assert.equal(received.legacyRunnerDisabled, true);
   assert.match(received.csrfToken, /^[0-9a-f]{64}$/);
 });
 

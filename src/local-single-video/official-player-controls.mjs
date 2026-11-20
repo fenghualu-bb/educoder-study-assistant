@@ -1,6 +1,3 @@
-import { officialRates } from './playback-options.mjs';
-
-// Current official UI: #video-controls / #volume-button and a visible “倍速” dropdown.
 // All writes are normal UI clicks; media properties are read only.
 export class OfficialPlayerControls {
   constructor(page) { this.page = page; }
@@ -62,19 +59,6 @@ export class OfficialPlayerControls {
     try { await container.waitFor({ state: 'visible', timeout: 3000 }); check(); }
     catch { check(); throw new Error('OFFICIAL_CONTROLS_UNAVAILABLE'); }
     return container;
-  }
-  async muteAvailable(check = () => {}) {
-    try {
-      await this.usableControl((await this.controls(check)).locator('#volume-button'), 'OFFICIAL_MUTE_UNAVAILABLE', check); check();
-      return true;
-    } catch { check(); return false; }
-  }
-  async setMuted(muted, check = () => {}) {
-    check(); const current = await this.page.locator('video').evaluate(video => video.muted); check();
-    if (current === muted) return;
-    const button = await this.usableControl((await this.controls(check)).locator('#volume-button'), 'OFFICIAL_MUTE_UNAVAILABLE', check); check();
-    await button.click({ timeout: 3000 }); check();
-    await this.page.waitForFunction(expected => document.querySelector('video')?.muted === expected, muted, { timeout: 3000 }); check();
   }
   async restorePosition(seconds, duration, check = () => {}) {
     if (!Number.isFinite(seconds) || !Number.isFinite(duration) || duration <= 0 || seconds < 0 || seconds > duration)
@@ -139,40 +123,5 @@ export class OfficialPlayerControls {
     const restoredSeconds=await this.page.locator('video').evaluate(video=>video.currentTime); check();
     if(restoredSeconds<seconds-range.step-.01||restoredSeconds>seconds+.05)throw new Error('RESTORE_REFUSED');
     return { restoredSeconds };
-  }
-  async speedMenu(check = () => {}) {
-    const container = await this.controls(check); check();
-    const trigger = container.getByText('倍速', { exact: true });
-    if (await trigger.count() !== 1 || !await trigger.isVisible()
-      || await trigger.getAttribute('aria-disabled') === 'true') throw new Error('OFFICIAL_SPEED_UNAVAILABLE');
-    check(); await trigger.hover({ timeout: 3000 }); check();
-    const menu = container.locator('[role="menu"]:visible');
-    await menu.waitFor({ state: 'visible', timeout: 3000 }); check();
-    if (await menu.count() !== 1) throw new Error('OFFICIAL_SPEED_UNAVAILABLE');
-    return menu;
-  }
-  async rates(check = () => {}) {
-    try {
-      const menu = await this.speedMenu(check), items = menu.locator('[role="menuitem"]'); check();
-      const result = [];
-      for (let i = 0; i < await items.count(); i++) {
-        const item = items.nth(i), text = (await item.innerText()).trim();
-        const match = text.match(/^(1(?:\.0)?|1\.5|2(?:\.0)?)\s*[x×]$/i);
-        if (match && await item.isVisible() && await item.getAttribute('aria-disabled') !== 'true'
-          && !String(await item.getAttribute('class') ?? '').includes('disabled')) result.push(Number(match[1]));
-      }
-      return result.length === new Set(result).size ? result.sort((a, b) => a - b) : [];
-    } catch { check(); return []; }
-    finally { await this.page.locator('video').hover({ timeout: 1000 }).catch(() => {}); }
-  }
-  async setRate(rate, check = () => {}) {
-    if (!officialRates.includes(rate)) throw new Error('OFFICIAL_SPEED_UNAVAILABLE');
-    check(); const menu = await this.speedMenu(check); check();
-    const label = rate === 1.5 ? /^1\.5\s*[x×]$/i : rate === 1 ? /^1(?:\.0)?\s*[x×]$/i : /^2(?:\.0)?\s*[x×]$/i;
-    const item = menu.getByRole('menuitem').filter({ hasText: label });
-    if (await item.count() !== 1 || !await item.isVisible() || await item.getAttribute('aria-disabled') === 'true'
-      || String(await item.getAttribute('class') ?? '').includes('disabled')) throw new Error('OFFICIAL_SPEED_UNAVAILABLE');
-    check(); await item.click({ timeout: 3000 }); check();
-    await this.page.waitForFunction(expected => document.querySelector('video')?.playbackRate === expected, rate, { timeout: 3000 }); check();
   }
 }

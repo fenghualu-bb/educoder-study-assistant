@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'">
-  <title>头歌学习助手 · 观看所选视频 · 0.1.14</title>
+  <title>头歌学习助手 · 观看所选视频 · 0.2.0</title>
   <link rel="stylesheet" href="../../../public/theme.css">
   <link rel="stylesheet" href="style.css">
   <script src="../../../public/theme.js" defer></script>
@@ -12,28 +12,21 @@
 </head>
 <body>
   <main>
-    <header><div><p class="eyebrow">本地手动模式</p><h1>观看所选视频</h1></div><div class="header-tools"><span id="version" class="version">0.1.14</span><button id="view-home" type="button">返回课堂</button></div></header>
+    <header><div><p class="eyebrow">本地手动模式</p><h1>观看所选视频</h1></div><div class="header-tools"><span id="version" class="version">0.2.0</span><button id="view-home" type="button">返回课堂</button></div></header>
     <p class="intro">沿用主程序的官方登录。</p>
     <section class="target"><span class="fixed">本次所选视频</span><h2 id="target-title">正在读取所选视频…</h2><p id="target-course"></p><p id="target-guidance" class="muted">只操作所选这一条。打开后保持暂停，不自动播放或跳到下一条。</p></section>
     <div class="status-line"><span id="stage">正在读取本机状态…</span><span id="connection"></span></div>
-    <section id="personal-queue-view" class="personal-queue-view" hidden><p id="queue-view-state" role="status"></p><p id="queue-view-hint">真实结束且官网确认100%才切换；验证或异常暂停。重开不自动启动。</p></section>
     <section class="metrics" aria-label="真实进度">
       <div><span>当前播放位置</span><strong id="current">—</strong><small id="duration">等待打开视频</small></div>
       <div><span>官网保存进度</span><strong id="percent">—</strong><small>仅取官方列表读数</small></div>
       <div><span>本机可恢复位置</span><strong id="resume">—</strong><small>来自实际播放观察</small></div>
     </section>
     <p class="explanation">百分比是官网保存的进度，时间是当前播放位置。回到已观看位置后，两者会不同；不把百分比换算成恢复秒数，也不据此计算本次观看总时长。</p>
-    <section id="viewing-options" class="viewing-options" aria-label="观看选项" hidden>
-      <div><label class="option-label"><input id="auto-mute" type="checkbox"> 播放时自动静音</label><p id="mute-state" class="option-state">默认关闭，仅控制官方播放器声音。</p></div>
-      <div><div class="speed-choice"><label class="option-label"><input id="speed-enabled" type="checkbox"> 官方倍速</label><select id="speed-value" aria-label="官方支持的播放速度" disabled><option value="1.5">1.5x（待核对）</option></select></div><p id="speed-state" class="option-state">默认关闭，打开视频后核对官方档位。</p></div>
-      <p id="options-hint" class="options-hint" role="status" aria-live="polite"></p>
-    </section>
     <div class="actions"><button class="primary" id="view-primary" data-action="open">准备所选视频</button></div>
     <section class="recovery" hidden><div><h3 id="resume-title">恢复本机观看位置</h3><p>恢复后仍保持暂停，再由你开始播放。</p></div><button data-action="restore" id="restore">恢复到记录位置（不播放）</button></section>
     <details id="view-tools" class="view-tools"><summary>官方窗口操作</summary><div class="secondary"><button data-action="official">查看当前官方窗口</button><button data-action="close-video">关闭当前官方视频</button><button data-action="refresh">读取官网保存进度</button></div></details>
     <div class="finish-actions"><button id="view-finish" type="button">结束观看并返回课堂</button><button id="view-discard" type="button" hidden>放弃本次未保存位置并返回课堂</button></div>
     <p id="message" role="status" aria-live="polite"></p>
-    <footer>仅使用官方允许的播放速度；倍速不保证加快平台学习进度。静音不改变系统音量，不修改学习时长或完成记录。</footer>
   </main>
 </body>
 </html>

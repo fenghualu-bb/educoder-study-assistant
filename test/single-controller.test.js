@@ -75,7 +75,7 @@ test('disposing while a card click is pending closes a late popup without adopti
   const context = { newPage: async () => list };
   const { controller } = await fixture(t, { sessionProvider: async () => ({ context }) });
   controller.selectCard = async () => ({ locator: () => ({ click: async () => { clicking.resolve(); await releaseClick.promise; } }) });
-  const opening = controller.openVideo(), stopped = assert.rejects(opening, /QUEUE_STOPPED/);
+  const opening = controller.openVideo(), stopped = assert.rejects(opening, /CLOSING/);
   try {
     await clicking.promise; await controller.dispose();
     popup.resolve(latePlayer); releaseClick.resolve(); await stopped; await flush();
@@ -181,7 +181,7 @@ for (const [diagnostic, expected] of [
   assert.equal(/private|secret-value|PRIVATE_SECRET_CODE/.test(JSON.stringify(refused)), false);assert.equal(refused.media.currentTime, 0);assert.equal(refused.media.paused, true);assert.equal(controller.touched, false);
 });
 
-for (const abortSignal of [false, true]) test('013 cancel pending official focus prevents a late play '+(abortSignal?'through queue abort':'through requestStop'), async t => {
+test('cancel pending official focus prevents a late play', async t => {
   const { controller, store } = await fixture(t), entered=deferred(), focus=deferred(), clicks=[];
   const media={currentTime:5,duration:100,paused:true,ended:false,playbackRate:1,readyState:4};
   controller.ledger=new ObservationLedger(observation(5));await controller.persist();
@@ -191,10 +191,9 @@ for (const abortSignal of [false, true]) test('013 cancel pending official focus
     locator:()=>({evaluate:async()=>({...media}),innerText:async()=>'暂无检查点'})};
   controller.verifiedPlayer=true;controller.controlsFactory=()=>({setPlaying:async playing=>{clicks.push(playing);media.paused=!playing;media.currentTime+=.1;}});
   controller.ownedPlayer=controller.player;
-  const abort=new AbortController();if(abortSignal)controller.operationSignal=abort.signal;
   const starting=controller.act('play');
-  try{await entered.promise;if(abortSignal)abort.abort();else controller.requestStop();focus.resolve();
-    const result=await starting;assert.equal(result.actionError,'QUEUE_STOPPED');assert.deepEqual(clicks,[]);assert.equal(controller.touched,false);
+  try{await entered.promise;controller.requestStop();focus.resolve();
+    const result=await starting;assert.equal(result.actionError,'CLOSING');assert.deepEqual(clicks,[]);assert.equal(controller.touched,false);
     await controller.dispose();assert.equal((await store.load(target)).observation.position,5);assert.equal((await store.load(target)).observation.watchedPrefix,5);
   }finally{focus.resolve();await starting;}
 });
@@ -206,7 +205,7 @@ for(const conflict of [false,true])test('013 canceled owned play retains unsaved
   controller.boundPlayerUrl='https://www.educoder.net/video_info?video_id=synthetic&course_id=SyntheticController';
   controller.player={isClosed:()=>closed,url:()=>controller.boundPlayerUrl,bringToFront:async()=>{entered.resolve();await focus.promise;},close:async()=>{closed=true;},locator:()=>({evaluate:async()=>({...media}),innerText:async()=>'暂无检查点'})};
   controller.ownedPlayer=controller.player;controller.verifiedPlayer=true;controller.controlsFactory=()=>({setPlaying:async()=>assert.fail('canceled play reached official controls')});
-  const starting=controller.act('play');try{await entered.promise;controller.requestStop();focus.resolve();assert.equal((await starting).actionError,'QUEUE_STOPPED');assert.equal(closed,true);
+  const starting=controller.act('play');try{await entered.promise;controller.requestStop();focus.resolve();assert.equal((await starting).actionError,'CLOSING');assert.equal(closed,true);
     if(conflict){const latest=await store.load(target);await store.save(latest,observation(9),null);const newer=await fs.readFile(store.file(target));
       await assert.rejects(controller.dispose(),/RECORD_CHANGED/);await assert.rejects(controller.dispose(),/RECORD_CHANGED/);
       await controller.dispose({discardUnsavedPosition:true});assert.deepEqual(await fs.readFile(store.file(target)),newer);

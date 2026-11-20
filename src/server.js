@@ -6,7 +6,6 @@ import { RunError } from './run-error.js';
 const files = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
-  ['/personal-home.js', ['personal-home.js', 'text/javascript; charset=utf-8']],
   ['/theme.js', ['theme.js', 'text/javascript; charset=utf-8']],
   ['/theme.css', ['theme.css', 'text/css; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
@@ -30,15 +29,8 @@ async function readJson(request) {
   }
 }
 
-function exactBody(body, keys) {
-  return body && typeof body === 'object' && !Array.isArray(body)
-    && Object.keys(body).length === keys.length
-    && Object.keys(body).every(key => keys.includes(key));
-}
-
-export function createServer({ openBrowser, start, scan, stop, listClassrooms, getStatus, getInventory },
-  { csrfToken = null, legacyRunnerDisabled = false } = {}) {
-  if (legacyRunnerDisabled && (typeof csrfToken !== 'string' || !csrfToken)) throw new Error('CSRF_REQUIRED');
+export function createServer({ openBrowser, scan, stop, listClassrooms, getStatus, getInventory },
+  { csrfToken = null } = {}) {
   const server = http.createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'");
@@ -51,8 +43,7 @@ export function createServer({ openBrowser, start, scan, stop, listClassrooms, g
     try {
       const path = new URL(request.url, localOrigin).pathname;
       if (request.method === 'GET' && path === '/api/bootstrap') {
-        sendJson(response, 200, { csrfToken, desktopMode: csrfToken !== null,
-          ...(legacyRunnerDisabled ? { playbackAllowed: false } : {}) });
+        sendJson(response, 200, { csrfToken, desktopMode: csrfToken !== null });
         return;
       }
       if (request.method === 'GET' && path === '/api/status') {
@@ -86,35 +77,6 @@ export function createServer({ openBrowser, start, scan, stop, listClassrooms, g
         }
         if (path === '/api/classrooms') {
           sendJson(response, 200, { classrooms: await listClassrooms() });
-          return;
-        }
-        if (path === '/api/start') {
-          if (legacyRunnerDisabled) {
-            sendJson(response, 503, { errorCode: 'LEGACY_RUNNER_DISABLED' });
-            return;
-          }
-          const { url, maxVideos = 1, maxPages = 1, startPage = 1,
-            replaceInterrupted = false } = await readJson(request);
-          const listUrl = normalizeClassroomUrl(url);
-          if (!Number.isInteger(maxVideos) || maxVideos < 1 || maxVideos > 3) {
-            const error = new Error('一次最多试运行 3 条，请选择 1 到 3 条');
-            error.statusCode = 400;
-            throw error;
-          }
-          if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 2
-            || !Number.isInteger(startPage) || startPage < 1 || startPage > 1_000) {
-            const error = new Error('试运行只能选择课程页码和最多连续 2 页');
-            error.statusCode = 400;
-            throw error;
-          }
-          if (typeof replaceInterrupted !== 'boolean') {
-            const error = new Error('中断记录确认参数无效');
-            error.statusCode = 400;
-            throw error;
-          }
-          await start(listUrl, { maxVideos, maxPages, startPage,
-            ...(replaceInterrupted ? { replaceInterrupted: true } : {}) });
-          sendJson(response, 202, { ok: true, listUrl });
           return;
         }
         if (path === '/api/scan') {

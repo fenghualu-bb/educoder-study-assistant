@@ -12,8 +12,6 @@ import { SingleController } from '../src/local-single-video/controller.mjs';
 import { registerManualVideoDesktop } from '../src/local-manual-video.js';
 import { createController } from '../src/controller.js';
 import { RunError } from '../src/run-error.js';
-import { createPlaybackOptionsStore } from '../src/local-single-video/playback-options.mjs';
-import { PersonalQueueController } from '../src/personal-queue-controller.mjs';
 
 const directories = [];
 async function temporary() { const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'educoder-manual-test-')); directories.push(dir); return dir; }
@@ -190,38 +188,6 @@ test('a failed position save cannot be swallowed by finish or replace a newer di
   assert.deepEqual(await fs.readFile(other.file(targetA)), before);
 });
 
-test('main controller reuses its official session for manual mode and keeps the automated full-course gate closed', async () => {
-  let launches = 0; const session = { context: { close: async () => {} } };
-  const controller = createController({ launch: async () => { launches++; return session; }, makeCourse: () => ({}) });
-  assert.equal(await controller.getManualSession(), session); assert.equal(await controller.getManualSession(), session); assert.equal(launches, 1);
-  await assert.rejects(controller.startFullCourse(url('SyntheticA')), /整课/);
-  assert.equal(controller.startPaidCourse, undefined);
-  await controller.shutdown(); await assert.rejects(controller.getManualSession(), /关闭/);
-});
-test('an embedded paused session locks root discovery, scanning and task start without a second helper window',async()=>{
-  const controller=createController({initialInventory:snapshot(),launch:async()=>({page:{isClosed:()=>false},context:{close:async()=>{}}}),makeCourse:()=>({}),readClassrooms:async()=>[]});
-  await controller.openBrowser();controller.setViewingSession({active:true,embedded:true,viewerOpen:false,opening:false,closing:false,queue:{active:false,phase:'paused'}});
-  try{for(const run of [()=>controller.openBrowser(),()=>controller.listClassrooms(),()=>controller.scan(url('SyntheticA')),()=>controller.start(url('SyntheticA'))])await assert.rejects(run(),error=>error.code==='VIEWING_ACTIVE');
-    controller.setViewingSession({active:false,viewerOpen:false,opening:false,closing:false});await assert.doesNotReject(controller.listClassrooms());
-  }finally{await controller.shutdown();}
-});
-
-test('a closed official session is reopened only on the next user action and keeps the scan and formal gates', async () => {
-  let launches = 0, context;
-  const inventory = snapshot();
-  const controller = createController({ initialInventory: inventory, makeCourse: () => ({}), launch: async () => {
-    launches++; context = new EventEmitter(); context.close = async () => context.emit('close');
-    return { context, page: { isClosed: () => false, bringToFront: async () => {} } };
-  } });
-  await controller.openBrowser(); await context.close();
-  assert.equal(launches, 1); assert.equal(controller.getStatus().officialWindowClosed, true);
-  assert.equal(controller.getInventory(), inventory);
-  await Promise.all([controller.getManualSession(), controller.getManualSession()]); assert.equal(launches, 2);
-  await assert.rejects(controller.startFullCourse(url('SyntheticA')), /整课/);
-  assert.equal(controller.startPaidCourse, undefined);
-  await controller.shutdown();
-});
-
 test('closing only the main official tab creates a new tab on request without closing the shared browser', async () => {
   const context = new EventEmitter(); let closes = 0, created = 0, visited;
   context.close = async () => { closes++; };
@@ -286,7 +252,6 @@ test('desktop accepts only a trusted heatmap selection and refuses switching unt
   const event = { sender: main.webContents, senderFrame: frame }, open = handlers.get('local-manual-video:open');
   await assert.rejects(open({ ...event, sender: {} }, request(targetA)));
   await assert.rejects(handlers.get('appearance:set')({ ...event, sender: {} }, 'dark'));
-  assert.throws(() => handlers.get('single:options')(event, { autoMute: true }), /当前观看窗口/);
   await assert.rejects(handlers.get('appearance:set')(event, 'invalid'), /APPEARANCE_INVALID/);
   await handlers.get('appearance:set')(event, 'dark'); assert.equal(await handlers.get('appearance:get')(event), 'dark');
   await assert.rejects(open(event, { ...request(targetA), title: '注入视频' })); assert.equal(created, 0);
@@ -298,201 +263,4 @@ test('desktop accepts only a trusted heatmap selection and refuses switching unt
   await finish(); await open(event, request(targetB)); assert.equal(created, 2);
   await finish(); snapshotValue = snapshot('SyntheticB'); await open(event, request({ ...targetA, classroomId: 'SyntheticB' })); assert.equal(created, 3);
   await manager.close();
-});
-
-async function embeddedRetryFixture(t, { controlWait = null, beforePlay = null, releaseControl = null } = {}) {
-  const directory = await temporary(), handlers = new Map(), windows = [];
-  const origin = 'http://127.0.0.1:51003', inventory = snapshot();
-  let child, player, playAttempts = 0, denyPlay = true;
-  class Window extends EventEmitter {
-    constructor() {
-      super(); windows.push(this); this.webContents = new EventEmitter();
-      this.webContents.mainFrame = { url: origin + '/' };
-      this.webContents.getURL = () => this.webContents.mainFrame.url;
-      this.webContents.send = () => {}; this.webContents.setWindowOpenHandler = () => {};
-    }
-    restore() {} show() {} focus() {} isDestroyed() { return false; }
-  }
-  const main = new Window(), event = { sender: main.webContents, senderFrame: main.webContents.mainFrame };
-  const list = { closed: false, url: () => inventory.courseUrl, isClosed() { return this.closed; },
-    close: async function () { this.closed = true; }, bringToFront: async () => {} };
-  const context = { pages: () => player ? [list, player] : [list] };
-  const runtime = { origin, controller: { getStatus: () => ({ phase: 'inventory-complete' }),
-    getInventory: () => inventory, isTaskActive: () => false, getManualSession: async () => ({ context }) } };
-  const manager = registerManualVideoDesktop({ app: { getPath: () => directory, getVersion: () => '0.1.17', isPackaged: false },
-    ipcMain: { handle: (name, fn) => handlers.set(name, fn), removeHandler: name => handlers.delete(name) },
-    BrowserWindow: Window, window: main, getRuntime: () => runtime,
-    controllerFactory: options => {
-      child = new SingleController({ ...options, controlsFactory: () => ({
-        setPlaying: async playing => {
-          if (playing) {
-            playAttempts++; beforePlay?.(); await (typeof controlWait === 'function' ? controlWait() : controlWait);
-            if (denyPlay) throw new Error('PLAY_NOT_STARTED');
-          }
-          player.value.paused = !playing; if (playing) player.value.currentTime += .05;
-        }, muteAvailable: async () => true, rates: async () => [1],
-        setMuted: async muted => { player.value.muted = muted; }
-      }) });
-      const init = child.init.bind(child);
-      child.init = async () => { await init(); clearTimeout(child.timer); await child.ticking; };
-      child.selectCard = async () => { child.percent = 20; return { locator: () => ({ click: async () => {} }) }; };
-      child.openVideo = async () => {
-        player = fakePlayer('retry-only'); child.player = player; child.ownedPlayer = player; child.page = list;
-        child.context = context; child.boundPlayerUrl = player.url(); child.verifiedPlayer = true;
-        child.touched = false; child.stage = 'paused'; await child.sample(); await child.applyPlaybackOptions();
-      };
-      child.native = async (action, _pid, seconds) => { assert.equal(action, 'restore'); player.value.currentTime = seconds; };
-      return child;
-    }
-  });
-  t.after(async () => { releaseControl?.(); await manager.close(); });
-  const call = (name, ...args) => handlers.get('local-manual-video:' + name)(event, ...args);
-  return { directory, windows, call, get player() { return player; }, get child() { return child; },
-    get playAttempts() { return playAttempts; }, allowPlay() { denyPlay = false; },
-    start: () => call('start', { mode: 'single', courseUrl: inventory.courseUrl,
-      selections: [request(targetA)], fromBeginning: false, resumeSaved: false }) };
-}
-
-test('017 initial PLAY_NOT_STARTED commits a cancellable embedded retry session without the start deadline rolling it back', async t => {
-  const f = await embeddedRetryFixture(t), start = f.start();
-  start.catch(() => {});
-  let timer;
-  const state = await Promise.race([start, new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error('embedded start did not expose its active retry session')), 2000);
-  })]).finally(() => clearTimeout(timer));
-  assert.equal(state.active, true); assert.equal(state.embedded, true); assert.equal(state.opening, false);
-  assert.equal(state.queue.active, true); assert.equal(state.queue.phase, 'playing'); assert.equal(state.queue.retrying, true);
-  assert.equal(state.failure, null); assert.equal(state.actionError, null); assert.equal(state.media.paused, true);
-  assert.equal(state.media.currentTime, 0); assert.equal(state.resumeSeconds, 0); assert.equal(state.queue.cursor, 0);
-  assert.equal(f.windows.length, 1); assert.equal(f.player.closed, false); assert.equal(f.playAttempts, 1);
-  const saved = JSON.parse(await fs.readFile(path.join(f.directory, 'EducoderManualVideoPlayer', 'personal-temporary-queue.json'), 'utf8'));
-  assert.equal(saved.phase, 'playing'); assert.equal(saved.cursor, 0);
-  const paused = await f.call('action', 'pause');
-  assert.equal(paused.queue.active, false); assert.equal(paused.queue.retrying, false); assert.equal(paused.queue.reason, 'USER_PAUSED');
-  f.allowPlay(); await new Promise(resolve => setTimeout(resolve, 2100));
-  assert.equal(f.playAttempts, 1, 'a formerly scheduled retry must not restart a user-paused player');
-  assert.equal(f.player.value.paused, true); assert.equal((await f.call('status')).queue.cursor, 0);
-  await f.call('finish'); assert.equal(f.player.closed, true); assert.equal((await f.call('status')).active, false);
-});
-
-function limitOnlyPreparedQueueStart(t, fixture, milliseconds = 10) {
-  const start = PersonalQueueController.prototype.start;
-  PersonalQueueController.prototype.start = function (...args) {
-    if (this.single === fixture.child) this.operationMs = milliseconds;
-    return start.apply(this, args);
-  };
-  t.after(() => { PersonalQueueController.prototype.start = start; });
-}
-
-test('017 legal initial control latency beyond the former aggregate start deadline still commits the retry session', async t => {
-  const f = await embeddedRetryFixture(t, { controlWait: () => new Promise(resolve => setTimeout(resolve, 100)) });
-  limitOnlyPreparedQueueStart(t, f);
-  const state = await f.start();
-  assert.equal(state.active, true); assert.equal(state.opening, false); assert.equal(state.queue.active, true);
-  assert.equal(state.queue.retrying, true); assert.equal(state.actionError, null); assert.equal(f.player.closed, false);
-  assert.equal(f.playAttempts, 1); assert.equal(state.queue.cursor, 0);
-  const saved = JSON.parse(await fs.readFile(path.join(f.directory, 'EducoderManualVideoPlayer', 'personal-temporary-queue.json'), 'utf8'));
-  assert.equal(saved.phase, 'playing'); assert.equal(saved.cursor, 0);
-  await f.call('finish'); assert.equal((await f.call('status')).active, false);
-});
-
-test('017 finishing while the first control operation exceeds the former start deadline cancels a late retry commit', async t => {
-  let release, entered;
-  const waiting = new Promise(resolve => { release = resolve; }), called = new Promise(resolve => { entered = resolve; });
-  const f = await embeddedRetryFixture(t, { controlWait: waiting, beforePlay: entered, releaseControl: release });
-  limitOnlyPreparedQueueStart(t, f);
-  const start = f.start(); start.catch(() => {}); await called;
-  await new Promise(resolve => setTimeout(resolve, 50));
-  const pending = await f.call('status'); assert.equal(pending.opening, true);
-  const finish = f.call('finish'); release(); await assert.rejects(start); await finish;
-  const stopped = await f.call('status');
-  assert.equal(stopped.active, false); assert.equal(stopped.opening, false); assert.equal(stopped.queue, null);
-  assert.equal(f.player.closed, true); assert.equal(f.playAttempts, 1);
-  await assert.rejects(fs.access(path.join(f.directory, 'EducoderManualVideoPlayer', 'personal-temporary-queue.json')),
-    error => error.code === 'ENOENT');
-  f.allowPlay(); await new Promise(resolve => setTimeout(resolve, 50));
-  assert.equal(f.playAttempts, 1); assert.equal((await f.call('status')).active, false);
-});
-
-async function optionController(directory, target = targetA, capabilities = { mute: true, rates: [1, 1.5, 2] }) {
-  const changes = [];
-  const playbackStore = createPlaybackOptionsStore(path.join(directory, 'playback-options.json'));
-  const fake = await manualController(directory, target, { playbackStore, controlsFactory: player => ({
-    muteAvailable: async () => capabilities.mute,
-    rates: async () => [...capabilities.rates],
-    setMuted: async value => { if (!capabilities.mute && player.value.muted !== value) throw new Error('OFFICIAL_MUTE_UNAVAILABLE');
-      changes.push({ mute: value }); player.value.muted = value; },
-    setRate: async value => { if (!capabilities.rates.includes(value)) throw new Error('OFFICIAL_SPEED_UNAVAILABLE');
-      changes.push({ rate: value }); player.value.playbackRate = value; },
-  }) });
-  return { ...fake, changes, playbackStore };
-}
-test('auto mute is applied before an explicit play and disabling restores the original player volume without seeking', async () => {
-  const fake = await optionController(await temporary());
-  try {
-    await fake.controller.act('open'); assert.equal(fake.player().value.muted, false);
-    await fake.controller.changePlaybackOptions({ autoMute: true });
-    assert.equal(fake.player().value.muted, true); assert.equal(fake.player().value.volume, 0.35);
-    assert.equal(fake.player().clicks, 0); assert.equal(fake.player().value.currentTime, 0);
-    await fake.controller.act('play'); assert.equal(fake.player().value.muted, true); assert.equal(fake.player().clicks, 1);
-    await fake.controller.changePlaybackOptions({ autoMute: false });
-    assert.equal(fake.player().value.muted, false); assert.equal(fake.player().value.volume, 0.35);
-    assert.equal(fake.controller.status().playbackOptions.speedEnabled, false);
-  } finally { await fake.controller.dispose(); }
-});
-test('disabling assisted mute preserves originally silent audio and respects a later official volume adjustment', async () => {
-  const fake = await optionController(await temporary());
-  try {
-    fake.player().value.muted = true; await fake.controller.act('open');
-    await fake.controller.changePlaybackOptions({ autoMute: true }); await fake.controller.changePlaybackOptions({ autoMute: false });
-    assert.equal(fake.player().value.muted, true);
-    fake.player().value.muted = false;
-    await fake.controller.changePlaybackOptions({ autoMute: true });
-    fake.player().value.muted = false; fake.player().value.volume = 0.5;
-    await fake.controller.changePlaybackOptions({ autoMute: false });
-    assert.equal(fake.player().value.muted, false); assert.equal(fake.player().value.volume, 0.5);
-  } finally { await fake.controller.dispose(); }
-});
-test('official supported speed is user enabled, restored to 1x on disable and persists for another selected video without autoplay', async () => {
-  const directory = await temporary(), first = await optionController(directory);
-  try {
-    await first.controller.act('open');
-    await first.controller.changePlaybackOptions({ speedEnabled: true, speed: 2 });
-    assert.equal(first.player().value.playbackRate, 2); assert.equal(first.player().clicks, 0);
-    await first.controller.changePlaybackOptions({ speedEnabled: false });
-    assert.equal(first.player().value.playbackRate, 1); assert.ok(first.changes.some(change => change.rate === 1));
-    await first.controller.changePlaybackOptions({ speedEnabled: true, speed: 1.5 });
-  } finally { await first.controller.dispose(); }
-  const second = await optionController(directory, targetB);
-  try {
-    assert.equal(second.controller.status().playbackOptions.speedEnabled, true);
-    await second.controller.act('open'); assert.equal(second.player().value.playbackRate, 1.5);
-    assert.equal(second.player().clicks, 0); assert.equal(second.player().value.currentTime, 0);
-    assert.equal(second.controller.status().resumeSeconds, 0);
-  } finally { await second.controller.dispose(); }
-});
-test('officially unavailable options never force mute or rate and retain normal manual playback', async () => {
-  const fake = await optionController(await temporary(), targetA, { mute: false, rates: [1] });
-  try {
-    await fake.controller.act('open');
-    await fake.controller.changePlaybackOptions({ autoMute: true, speedEnabled: true, speed: 2 });
-    assert.equal(fake.player().value.playbackRate, 1); assert.equal(fake.player().value.muted, false);
-    assert.match(fake.controller.status().optionsHint, /未提供.*静音.*未开放.*倍速/);
-    assert.equal(fake.controller.status().playAllowed, true);
-    assert.equal(fake.player().clicks, 0); assert.equal(fake.changes.length, 0);
-    await assert.rejects(fake.controller.changePlaybackOptions({ speed: 99 }), /PLAYBACK_OPTIONS_INVALID/);
-    await fake.controller.act('play'); assert.equal(fake.player().clicks, 1);
-  } finally { await fake.controller.dispose(); }
-});
-test('lost official speed controls explain a failed reset and refuse another play at an unconfirmed speed', async () => {
-  const capabilities = { mute: true, rates: [1, 1.5, 2] }, fake = await optionController(await temporary(), targetA, capabilities);
-  try {
-    await fake.controller.act('open'); await fake.controller.changePlaybackOptions({ speedEnabled: true, speed: 2 });
-    capabilities.rates = [];
-    await fake.controller.changePlaybackOptions({ speedEnabled: false });
-    assert.equal(fake.player().value.playbackRate, 2); assert.equal(fake.controller.status().playAllowed, false);
-    assert.match(fake.controller.status().optionsHint, /未能恢复 1 倍速/);
-    await fake.controller.act('play'); assert.equal(fake.player().clicks, 0);
-    assert.equal(fake.controller.status().resumeSeconds, 0);
-  } finally { await fake.controller.dispose(); }
 });

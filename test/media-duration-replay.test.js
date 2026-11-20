@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { ObservationLedger, validateLedger } from '../src/local-single-video/ledger.mjs';
 import { PositionStore } from '../src/local-single-video/position-store.mjs';
-import { PersonalQueueController } from '../src/personal-queue-controller.mjs';
 import { SingleController } from '../src/local-single-video/controller.mjs';
 const target={classroomId:'SyntheticDurationReplay',title:'Synthetic replay',page:1,index:0};
 const completed=()=>({version:1,target,watchedPrefix:120.04,position:120.04,duration:120.04,watchedRanges:[[0,120.04]]});
@@ -51,26 +50,6 @@ test('a duration fault breaks observation continuity before metadata recovers',a
  controller.readMedia=async()=>media(6.2);await controller.sample();
  assert.equal(controller.ledger.value.position,6.2);
  validateLedger(controller.ledger.value,target);
-});
-
-test('queue duration drift closes only its owned player, preserves the valid record and never advances',async t=>{
- const directory=await fs.mkdtemp(path.join(os.tmpdir(),'educoder-duration-queue-'));
- t.after(()=>fs.rm(directory,{recursive:true,force:true}));
- const store=new PositionStore({directory}),record=await store.load(target);await store.save(record,completed(),null);
- const original=await fs.readFile(store.file(target));
- const single=new SingleController({dataDir:directory,appData:directory,target,positionStore:store,connectExistingBridge:false,sessionProvider:async()=>{throw new Error('No browser permitted');}});
- await single.init();clearTimeout(single.timer);
- let closed=false,listClosed=false,creates=0;
- const player={isClosed:()=>closed,close:async()=>{closed=true;},url:()=> 'https://www.educoder.net/video_info?new_video_id=synthetic'};
- single.player=single.ownedPlayer=player;single.boundPlayerUrl=player.url();single.verifiedPlayer=true;single.media=media(.5,120.04);
- single.page={isClosed:()=>listClosed,close:async()=>{listClosed=true;}};
- single.readMedia=async()=>media(.5,122);
- const queue=new PersonalQueueController({store:{save:async()=>{}},record:{cursor:0,phase:'ready',mode:'continuous',courseUrl:'https://www.educoder.net/classrooms/SyntheticDurationReplay/video'},targets:[target,{...target,index:1}],createSingle:async()=>{creates++;return single;}});
- await queue.start();await queue.job;
- assert.equal(closed,true);assert.equal(creates,1);assert.equal(queue.record.cursor,0);
- assert.equal(queue.record.phase,'paused');assert.equal(queue.record.reason,'PLAYER_CHANGED');
- assert.deepEqual(await fs.readFile(store.file(target)),original);
- await queue.dispose();
 });
 
 test('duration validation stays bound to the opened stream across smaller cumulative increases',async()=>{

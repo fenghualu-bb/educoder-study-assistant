@@ -132,41 +132,6 @@ test('official playback refuses absent disabled or ambiguous controls and a clic
   assert.equal(await page.locator('video').evaluate(video=>video.currentTime),0);
 }));
 
-test('official adapter clicks available sound and rate controls without starting or seeking media', async () => {
-  await withPlayer(async (page, controls) => {
-    assert.equal(await controls.muteAvailable(), true);
-    assert.deepEqual(await controls.rates(), [1, 1.5, 2]);
-    await controls.setMuted(true); await controls.setMuted(true); await controls.setMuted(false);
-    await controls.setRate(1.5); await controls.setRate(2); await controls.setRate(1);
-    assert.deepEqual(await page.evaluate(() => ({ clicks, muted: video.muted, volume: video.volume,
-      rate: video.playbackRate, paused: video.paused, time: video.currentTime })), {
-      clicks: ['mute', 'mute', '1.5x', '2.0x', '1.0x'], muted: false, volume: .35, rate: 1, paused: true, time: 0,
-    });
-  });
-});
-
-test('official adapter refuses absent, hidden, disabled, ambiguous and unsupported speed controls', async () => {
-  await withPlayer(async (page, controls) => {
-    for (const change of [
-      () => document.querySelector('#speed-trigger').remove(),
-      () => document.querySelector('#speed-trigger').style.display = 'none',
-      () => document.querySelector('#speed-trigger').setAttribute('aria-disabled', 'true'),
-      () => document.querySelectorAll('[role=menuitem]')[2].setAttribute('aria-disabled', 'true'),
-      () => { const item = document.querySelectorAll('[role=menuitem]')[2]; item.parentNode.append(item.cloneNode(true)); },
-      () => document.querySelector('#video-controls').append(document.createElement('video')),
-    ]) {
-      await page.setContent(fixture); await page.evaluate(change);
-      await assert.rejects(controls.setRate(2));
-      assert.deepEqual(await page.evaluate(() => clicks), []);
-      assert.equal(await page.locator('video').first().evaluate(video => video.playbackRate), 1);
-    }
-    await page.setContent(fixture); await assert.rejects(controls.setRate(99), /OFFICIAL_SPEED_UNAVAILABLE/);
-    await page.evaluate(() => document.querySelector('#volume-button').disabled = true);
-    assert.equal(await controls.muteAvailable(), false); await assert.rejects(controls.setMuted(true), /OFFICIAL_MUTE_UNAVAILABLE/);
-    assert.deepEqual(await page.evaluate(() => clicks), []);
-  });
-});
-
 test('013 cancel during real official click actionability closes only the owned paused player without late playback',async()=>withPlayer(async(page,controls)=>{
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'educoder-cancel-click-')),target={classroomId:'SyntheticCancel',page:1,index:0,title:'合成取消播放'};
   const store=new PositionStore({directory:path.join(directory,'positions')}),context=page.context(),other=await context.newPage(),clicks=[];
@@ -187,7 +152,7 @@ test('013 cancel during real official click actionability closes only the owned 
     const starting=single.act('play');await Promise.race([clicking,starting.then(state=>{throw new Error('play settled before click: '+state.actionError);})]);await page.waitForTimeout(100);assert.deepEqual(clicks,[]);
     single.requestStop();await single.pendingPlayClose?.catch(()=>{});await page.locator('#click-blocker').evaluate(node=>node.remove()).catch(()=>{});
     const stopped=await starting;await single.dispose();
-    assert.equal(stopped.actionError,'QUEUE_STOPPED');assert.equal(clicks.includes('play'),false);assert.equal(single.touched,false);assert.equal(page.isClosed(),true);assert.equal(other.isClosed(),false);
+    assert.equal(stopped.actionError,'CLOSING');assert.equal(clicks.includes('play'),false);assert.equal(single.touched,false);assert.equal(page.isClosed(),true);assert.equal(other.isClosed(),false);
     assert.equal((await store.load(target)).observation.position,5);assert.equal((await store.load(target)).observation.watchedPrefix,5);
   }finally{await single.dispose().catch(()=>{});await other.close().catch(()=>{});assert.equal(path.dirname(directory).toLowerCase(),os.tmpdir().toLowerCase());await fs.rm(directory,{recursive:true,force:true});}
 }));
@@ -218,7 +183,7 @@ async function withObservedPlayer(page, controls, run) {
   }
 }
 
-for (const abortSignal of [false, true]) test('013 stop before real media confirmation cancels an asynchronous official play handler '+(abortSignal ? 'through queue abort' : 'through requestStop'), async () => withPlayer(async (page, controls) => {
+test('stop before real media confirmation cancels an asynchronous official play handler', async () => withPlayer(async (page, controls) => {
   await withObservedPlayer(page, controls, async ({ single, store, target, other }) => {
     const playingEvents = [], setPlaying = controls.setPlaying.bind(controls);
     let clicked; const clickReturned = new Promise(resolve => { clicked = resolve; });
@@ -233,17 +198,16 @@ for (const abortSignal of [false, true]) test('013 stop before real media confir
     });
     controls.setPlaying = (playing, callbacks) => setPlaying(playing, { ...callbacks,
       onClickFinished: () => { callbacks?.onClickFinished?.(); clicked(); } });
-    const abort = new AbortController(); if (abortSignal) single.operationSignal = abort.signal;
     const starting = single.act('play');
     try {
       await Promise.race([clickReturned,starting.then(state=>{throw new Error('play settled before confirmation wait: '+state.actionError);})]);
       assert.deepEqual(await page.locator('video').evaluate(video => ({ paused: video.paused, time: video.currentTime })), { paused: true, time: 0 });
-      if (abortSignal) abort.abort(); else single.requestStop();
+      single.requestStop();
       const closeWasStartedSynchronously = Boolean(single.pendingPlayClose);
       await single.pendingPlayClose?.catch(() => {});
       await page.evaluate(() => window.releaseOfficialReadiness()).catch(() => {});
       const canceled = await starting; await single.dispose();
-      assert.equal(canceled.actionError, 'QUEUE_STOPPED');
+      assert.equal(canceled.actionError, 'CLOSING');
       assert.deepEqual(playingEvents, []);
       assert.equal(closeWasStartedSynchronously, true); assert.equal(single.touched, false);
       assert.equal(page.isClosed(), true); assert.equal(other.isClosed(), false);
@@ -273,7 +237,7 @@ test('013 stop after real media confirmation uses the normal official pause and 
       single.requestStop();
       assert.equal(page.isClosed(), false); assert.equal(single.pendingPlayClose, null);
       release(); const canceled = await starting; await single.dispose();
-      assert.equal(canceled.actionError, 'QUEUE_STOPPED');
+      assert.equal(canceled.actionError, 'CLOSING');
       assert.deepEqual(clicks, ['play', 'pause']); assert.equal(single.media.paused, true);
       assert.equal(page.isClosed(), true); assert.equal(other.isClosed(), false);
       const saved = await store.load(target);
@@ -315,7 +279,7 @@ test('019 cancel while awaiting progress readiness prevents a later official res
   await page.evaluate(duration=>{const seek=document.createElement('input');seek.type='range';seek.min='0';seek.max=String(Math.floor(duration));seek.step='1';seek.style.width='400px';seek.disabled=true;seek.onclick=()=>window.seekClicked=true;
     document.querySelector('#video-controls').append(seek);setTimeout(()=>seek.disabled=false,300);},duration);
   const stopAt=Date.now()+70;
-  await assert.rejects(controls.restorePosition(3,duration,()=>{if(Date.now()>=stopAt)throw new Error('QUEUE_STOPPED');}),/QUEUE_STOPPED/);
+  await assert.rejects(controls.restorePosition(3,duration,()=>{if(Date.now()>=stopAt)throw new Error('CLOSING');}),/CLOSING/);
   await page.waitForTimeout(350);assert.equal(await page.evaluate(()=>window.seekClicked===true),false);
   assert.equal(await page.locator('video').evaluate(v=>v.currentTime),0);
 }));

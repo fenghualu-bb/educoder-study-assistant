@@ -3,7 +3,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SingleController } from '../src/local-single-video/controller.mjs';
-import { PersonalQueueController } from '../src/personal-queue-controller.mjs';
 
 const target = { classroomId: 'SyntheticDiscard', title: 'Synthetic clip', page: 1, index: 0 };
 function deferred() { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; }
@@ -34,31 +33,10 @@ for (const code of ['EIO', 'ENOSPC']) test(`Single ${code}: cleanup before expli
   assert.equal(f.writes, before, 'discard never retries or overwrites the position record');
 });
 
-test('queue-only save failure is discardable after child disposal', async () => {
-  const f = singleFixture(null); let queueWrites = 0;
-  const error = Object.assign(new Error('EACCES'), { code: 'EACCES' });
-  const record = { cursor: 0, phase: 'ready', reason: '', mode: 'single', courseUrl: 'https://www.educoder.net/classrooms/SyntheticDiscard/video' };
-  const queue = new PersonalQueueController({ record, targets: [target], createSingle: async () => f.single,
-    store: { save: async () => { queueWrites++; throw error; } } });
-  await queue.init(); queue.queueStateTouched = true;
-  await assert.rejects(queue.dispose(), actual => actual === error);
-  assert.equal(queue.single, null);
-  assert.equal(queue.status().discardAvailable, true);
-  const before = [queueWrites, f.writes];
-  await queue.dispose({ discardUnsavedPosition: true });
-  assert.deepEqual([queueWrites, f.writes], before);
-});
-
 test('playback failures or a reason string do not confer discard capability', async () => {
   for (const code of ['PLAY_NOT_STARTED', 'CHECKPOINT', 'VERIFICATION_REQUIRED', 'MEDIA_ERROR', 'EIO']) {
     const f = singleFixture(null); f.single.actionError = code;
     assert.equal(f.single.status().discardAvailable, false);
-    const record = { cursor: 0, phase: 'paused', reason: 'QUEUE_SAVE_FAILED', mode: 'single' };
-    const queue = new PersonalQueueController({ record, targets: [target], createSingle: async () => f.single, store: { save: async () => {} } });
-    await queue.init(); queue.record.reason = 'QUEUE_SAVE_FAILED';
-    assert.equal(queue.status().discardAvailable, false);
-    await assert.rejects(queue.dispose({ discardUnsavedPosition: true }), /DISCARD_NOT_AVAILABLE/);
-    await queue.dispose();
   }
 });
 
@@ -80,13 +58,4 @@ test('failed or unknown page close cannot expose save discard, and busy work rev
   f.single.busy=true;assert.equal(f.single.canDiscardSaveFailure(),false);f.single.busy=false;
   f.single.pendingPlay=Promise.resolve();assert.equal(f.single.canDiscardSaveFailure(),false);f.single.pendingPlay=null;
   f.single.ticking=Promise.resolve();assert.equal(f.single.canDiscardSaveFailure(),false);
-});
-
-test('queue I/O discard remains unavailable until its pending job settles', async () => {
-  const f=singleFixture('EIO'),gate=deferred();
-  const queue=new PersonalQueueController({record:{cursor:0,phase:'ready',reason:'',mode:'single'},targets:[target],createSingle:async()=>f.single,store:{save:async()=>{}}});
-  await queue.init();queue.job=gate.promise;
-  const finishing=queue.dispose();const failed=assert.rejects(finishing);
-  await new Promise(resolve=>setImmediate(resolve));assert.equal(queue.status().discardAvailable,false);
-  gate.resolve();await failed;assert.equal(queue.status().discardAvailable,true);
 });

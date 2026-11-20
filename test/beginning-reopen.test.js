@@ -31,11 +31,11 @@ for(const options of [{newTime:.7},{safetyError:'CHECKPOINT'}])test('reopened of
 });
 
 test('cancel during save cannot close or reopen a late beginning player',async()=>{
-  const f=fixture(),abort=new AbortController();let release,entered;
+  const f=fixture();let release,entered;
   const gate=new Promise(r=>{release=r;}),began=new Promise(r=>{entered=r;});
-  f.single.operationSignal=abort.signal;f.single.positionStore.save=async()=>{entered();await gate;};
-  const restarting=f.single.act('beginning');await began;abort.abort();release();const state=await restarting;
-  assert.equal(state.actionError,'QUEUE_STOPPED');assert.equal(f.player.isClosed(),false);assert.deepEqual(f.events,['zero-refused']);
+  f.single.positionStore.save=async()=>{entered();await gate;};
+  const restarting=f.single.act('beginning');await began;f.single.requestStop();release();const state=await restarting;
+  assert.equal(state.actionError,'CLOSING');assert.equal(f.player.isClosed(),false);assert.deepEqual(f.events,['zero-refused']);
 });
 
 test('a foreign player cannot take the reopen fallback',async()=>{
@@ -60,9 +60,9 @@ test('beginning confirms the final sampled zero, not only the initial reopened z
 });
 
 test('cancel during final beginning sample cannot report success',async()=>{
-  const f=fixture(),abort=new AbortController();f.single.operationSignal=abort.signal;
-  f.single.sample=async()=>{if(f.events.includes('open-same'))abort.abort();};
-  const state=await f.single.act('beginning');assert.equal(state.actionError,'QUEUE_STOPPED');assert.equal(f.saved.length,1);
+  const f=fixture();
+  f.single.sample=async()=>{if(f.events.includes('open-same'))f.single.requestStop();};
+  const state=await f.single.act('beginning');assert.equal(state.actionError,'CLOSING');assert.equal(f.saved.length,1);
 });
 
 test('a failed close cannot reopen a second beginning player',async()=>{

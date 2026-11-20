@@ -23,9 +23,7 @@ function closeWithDeadline(close, milliseconds = 10_000) {
 export async function runDesktop({ app, BrowserWindow, startRuntime, resourcesPath, projectRoot,
   browserMode = 'bundled', modeFromCommandLine = browserModeFromArgs,
   onModeConflict = () => {}, onSecondaryInstance = () => {}, onVersionConflict = () => {}, shutdownTimeoutMs = 10_000,
-  preloadPath, onWindowCreated = () => {},
-  // The early automated runner stays closed in the desktop app; viewing goes through the personal home.
-  legacyRunnerDisabled = true }) {
+  preloadPath, onWindowCreated = () => {} }) {
   const version = app.getVersion?.() ?? '当前候选';
   if (!app.requestSingleInstanceLock({ requestedVersion: version })) {
     try {
@@ -123,7 +121,6 @@ export async function runDesktop({ app, BrowserWindow, startRuntime, resourcesPa
       browserRoot: paths.browserRoot,
       port: 0,
       csrfToken: randomBytes(32).toString('hex'),
-      legacyRunnerDisabled,
     }));
     runtime = await startingRuntime;
     if (closing) return { window, runtime, paths, secondary: false };

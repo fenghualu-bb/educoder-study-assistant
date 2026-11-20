@@ -37,8 +37,9 @@ test('wrong version, missing bootstrap or entry, and missing license cannot pass
   }
 });
 async function stageFixture(t) {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'educoder-packaging-dependencies-'));
-  t.after(async()=>{assert.equal(path.dirname(root).toLowerCase(),path.resolve(os.tmpdir()).toLowerCase());assert.match(path.basename(root),/^educoder-packaging-dependencies-/);await fs.rm(root,{recursive:true,force:true});});
+  const tempDir=await fs.realpath(os.tmpdir());
+  const root=await fs.mkdtemp(path.join(tempDir,'educoder-packaging-dependencies-'));
+  t.after(async()=>{assert.equal(path.dirname(root).toLowerCase(),tempDir.toLowerCase());assert.match(path.basename(root),/^educoder-packaging-dependencies-/);await fs.rm(root,{recursive:true,force:true});});
   const projectRoot=path.join(root,'project'),cache=path.join(root,'cache'),buildPath=path.join(root,'packager-tmp','fixture','resources','app');
   await fs.mkdir(buildPath,{recursive:true});await fs.mkdir(path.join(projectRoot,'node_modules'),{recursive:true});await fs.mkdir(cache);
   const lock={version:pkg.version,packages:{'':{version:pkg.version,dependencies:pkg.dependencies},'node_modules/playwright-core':{version:dep.version}}};

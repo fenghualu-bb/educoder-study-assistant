@@ -18,8 +18,8 @@ module.exports = {
       'src/local-single-video/local-single-video-native-control.ps1'],
     ignore(absolutePath) {
       const input = String(absolutePath);
-      const relative = (/^[A-Za-z]:[\\/]/.test(input)
-        ? path.relative(__dirname, input)
+      const absolute = input.startsWith(__dirname + path.sep) || (/^[A-Za-z]:[\\/]/.test(input));
+      const relative = (absolute ? path.relative(__dirname, input)
         : input.replace(/^[\\/]+/, '')).replaceAll('\\', '/');
       if (!relative || relative.startsWith('../')) return false;
       const [root, second] = relative.split('/');

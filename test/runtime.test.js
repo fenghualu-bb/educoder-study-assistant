@@ -5,21 +5,20 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { startLocalRuntime } from '../src/runtime.js';
 
-test('desktop runtime keeps the legacy runner closed through the local API', async () => {
+test('runtime does not expose the previous task start API', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'educoder-candidate-runtime-'));
   let runtime;
   let launches = 0;
   try {
-    runtime = await startLocalRuntime({ dataDir, csrfToken: 'synthetic', legacyRunnerDisabled: true,
+    runtime = await startLocalRuntime({ dataDir, csrfToken: 'synthetic',
       launch: async () => { launches++; throw new Error('must not launch'); } });
     const bootstrap = await (await fetch(`${runtime.origin}/api/bootstrap`)).json();
-    assert.equal(bootstrap.playbackAllowed, false);
+    assert.deepEqual(bootstrap, { csrfToken: 'synthetic', desktopMode: true });
     const response = await fetch(`${runtime.origin}/api/start`, {
       method: 'POST', headers: { Origin: runtime.origin, 'Content-Type': 'application/json', 'X-Study-Token': 'synthetic' },
       body: JSON.stringify({ url: 'https://www.educoder.net/classrooms/SyntheticClass/video' }),
     });
-    assert.equal(response.status, 503);
-    assert.deepEqual(await response.json(), { errorCode: 'LEGACY_RUNNER_DISABLED' });
+    assert.equal(response.status, 404);
     assert.equal(launches, 0);
   } finally {
     await runtime?.close();
@@ -107,7 +106,7 @@ test('versioned desktop runtime backs up legacy progress before opening its loca
     assert.deepEqual(await readFile(path.join(backupDir, 'run-journal.json')), journal);
     assert.deepEqual(JSON.parse(await readFile(path.join(dataDir, 'data-upgrade.json'), 'utf8')),
       { version: 1, appVersion: '0.1.1' });
-    assert.deepEqual(runtime.controller.getStatus(), { phase: 'stopped', completed: 1, officialSessionOpen: false });
+    assert.deepEqual(runtime.controller.getStatus(), { phase: 'idle', officialSessionOpen: false });
   } finally {
     await runtime?.close();
     await rm(dataDir, { recursive: true, force: true });

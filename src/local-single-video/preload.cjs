@@ -6,8 +6,6 @@ contextBridge.exposeInMainWorld('studyAppearance', Object.freeze({
 contextBridge.exposeInMainWorld('singleVideo', {
   status: () => ipcRenderer.invoke('single:status'),
   action: action => ipcRenderer.invoke('single:action', action),
-  options: patch => ipcRenderer.invoke('single:options', patch),
-  queueAction: action => ipcRenderer.invoke('single:queue-action', action),
   home: () => ipcRenderer.invoke('single:home'),
   finish: () => ipcRenderer.invoke('single:finish'),
   discardAndFinish: () => ipcRenderer.invoke('single:discard-and-finish', true),

@@ -1,6 +1,6 @@
 {
   "name": "educoder-local-study-control",
-  "version": "0.1.19",
+  "version": "0.2.0",
   "description": "头歌（EduCoder）课堂视频进度查看与本机观看助手：只读扫描官方进度、热力图展示、通过官方播放器控件观看所选视频。",
   "license": "MIT",
   "repository": {
@@ -18,7 +18,7 @@
     "desktop:package": "electron-forge package",
     "desktop:audit": "node scripts/audit-package.mjs",
     "desktop:installer": "node scripts/build-candidate.mjs",
-    "desktop:verify": "node scripts/verify-package-source.mjs out/edge-candidate-0.1.19/educoder-local-study-control-win32-x64"
+    "desktop:verify": "node scripts/verify-package-source.mjs out/edge-candidate-0.2.0/educoder-local-study-control-win32-x64"
   },
   "dependencies": {
     "playwright-core": "1.63.0"

@@ -8,9 +8,8 @@ import { ChromeCourse } from '../chrome.js';
 import { normalizeClassroomUrl } from '../course.js';
 import { normalizeTarget, targetUrl, verifyPageSelection, playerIdentity } from './target.mjs';
 import { TARGET, sameTarget, ObservationLedger, importObservedEvents, freshLedger, validateLedger } from './ledger.mjs';
-import { defaultPlaybackOptions, validatePlaybackPatch } from './playback-options.mjs';
 import { OfficialPlayerControls } from './official-player-controls.mjs';
-import { personalQueueErrors, isPositionSaveIoError } from '../personal-queue-controller.mjs';
+const positionSaveErrors = new Set(['EBUSY', 'EIO', 'EACCES', 'EPERM', 'ENOSPC', 'EROFS', 'EMFILE']);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const errors = {
   RECORD_INVALID: '本地播放记录无法确认，原文件已保留。请交维护者处理。',
@@ -32,9 +31,6 @@ const errors = {
   CDN_TIMEOUT: '头歌页面资源暂未加载，请稍后重新打开；本机观看位置保留。',
   LIST_UNAVAILABLE: '所选视频列表暂不可读取，请在官方窗口检查登录和课堂访问权限，再重新扫描。',
   MEDIA_ERROR: '官方播放器加载失败，请关窗保留位置，恢复网络后重新打开；不会自动续播。',
-  PLAYBACK_OPTIONS_INVALID: '观看选项未能保存，原设置保留；请稍后重试或交维护者处理。',
-  OFFICIAL_SPEED_UNAVAILABLE: '此视频未提供可用的官方倍速控件，保持原速度；不会强制修改播放器。',
-  OFFICIAL_MUTE_UNAVAILABLE: '此视频未提供可用的官方静音控件；请在官方播放器自行处理声音。',
   OFFICIAL_PLAY_UNAVAILABLE: '未找到唯一可用的官方播放控件。请在官方窗口自行操作；本机未开始播放。',
   OFFICIAL_CONTROLS_UNAVAILABLE: '官方播放器控件尚未就绪，未开始播放。请查看官方窗口后主动重试。',
   PLAY_NOT_STARTED: '官方视频尚未真正开始播放。请查看官方窗口，再主动重试。',
@@ -54,27 +50,17 @@ const errors = {
   CLOSING: '本次操作已取消，已保存位置保留。',
   ENDED: '这条视频已结束；不会重新播放。',
   INVALID_ACTION: '当前操作不可用，请等待当前播放操作结束。',
-  QUEUE_SCAN_REQUIRED: '请完整扫描当前课堂，再选择仍在列表中的视频。',
-  QUEUE_RECORD_INVALID: '本地批次记录无法确认，原文件已保留。请交维护者处理。',
-  QUEUE_EMPTY: '没有可继续的保存批次，请在当前课堂选择视频。',
-  QUEUE_COMPLETED: '上次批次已确认完成，请选择本次要播放的视频。',
-  QUEUE_DUPLICATE: '本次所选视频有重复，请重新选择有限批次。',
-  QUEUE_REPLACE_REQUIRED: '已有保存批次，替换需要本次明确确认。',
-  OPTIONS_BUSY: '请等待当前播放操作结束后再修改设置。',
-  VIEWING_BUSY: '请等待当前播放操作结束；替换当前播放需要明确确认。',
   OPERATION_FAILED: '操作未完成，请查看官方窗口；本机位置保留，不会自动重试播放。',
 };
 Object.assign(errors, {
-  MEDIA_NOT_READY: '官方视频时长或媒体暂未就绪，正在等待后重试；已保存位置保留。',
-  PAGE_RESET: '官方页面返回了主页或课堂页，正在重新识别所选视频；已保存位置保留。',
+  MEDIA_NOT_READY: '官方视频时长或媒体暂未就绪，请检查官方窗口后重试；已保存位置保留。',
+  PAGE_RESET: '官方页面返回了主页或课堂页，请重新打开所选视频；已保存位置保留。',
   MEDIA_UNSUPPORTED: '官方播放器无法使用当前媒体，已暂停；请在官方页面确认，不会绕过限制。',
-  MEDIA_NETWORK_ERROR: '官方媒体连接暂时中断，正在等待连接恢复后重试；已保存位置保留。',
-  MEDIA_DECODE_ERROR: '官方媒体暂未成功解码，正在等待后重新打开所选视频；已保存位置保留。',
+  MEDIA_NETWORK_ERROR: '官方媒体连接暂时中断，请等连接恢复后重试；已保存位置保留。',
+  MEDIA_DECODE_ERROR: '官方媒体暂未成功解码，请稍后重新打开所选视频；已保存位置保留。',
 });
-export const recoverablePlaybackCodes = Object.freeze(['PAGE_LOAD_FAILED', 'CDN_TIMEOUT', 'LIST_UNAVAILABLE', 'MEDIA_NETWORK_ERROR', 'MEDIA_DECODE_ERROR',
+const readinessErrors = Object.freeze(['PAGE_LOAD_FAILED', 'CDN_TIMEOUT', 'LIST_UNAVAILABLE', 'MEDIA_NETWORK_ERROR', 'MEDIA_DECODE_ERROR',
   'MEDIA_NOT_READY', 'PAGE_RESET', 'PLAY_NOT_STARTED', 'OFFICIAL_PLAY_UNAVAILABLE', 'OFFICIAL_CONTROLS_UNAVAILABLE', 'OFFICIAL_PROGRESS_CONTROL_UNAVAILABLE']);
-const restoreFallbackCodes = new Set(['OFFICIAL_PROGRESS_CONTROL_UNAVAILABLE', 'OFFICIAL_CONTROLS_UNAVAILABLE', 'RESTORE_REFUSED']);
-const officialSessionKeepAlive = Symbol('official-session-keepalive');
 function resetPage(urlValue, target) {
   try {
     const url = new URL(urlValue);
@@ -86,9 +72,8 @@ function resetPage(urlValue, target) {
 export function playbackFailure(error) {
   const code = error?.code ?? error?.message;
   if (Object.hasOwn(errors, code)) return { code, message: errors[code] };
-  if (Object.hasOwn(personalQueueErrors, code)) return { code, message: personalQueueErrors[code] };
-  if (['EBUSY', 'EIO', 'EACCES', 'EPERM', 'ENOSPC', 'EROFS', 'EMFILE'].includes(code))
-    return { code, message: '本机记录或设置尚未保存，原文件保留；请检查后主动重试保存。' };
+  if (positionSaveErrors.has(code))
+    return { code, message: '本机位置尚未保存，原文件保留；请检查后主动重试保存。' };
   if (/Target (?:page, context or browser )?has been closed|Browser.*closed|Session closed/i.test(error?.message ?? '')) {
     return { code: 'OFFICIAL_WINDOW_CLOSED', message: errors.OFFICIAL_WINDOW_CLOSED };
   }
@@ -99,7 +84,7 @@ export function playbackFailure(error) {
 function errorMessage(error) { return playbackFailure(error).message; }
 export class SingleController {
   constructor({ dataDir, nativeScript, appData, temporary = os.tmpdir(), connectExistingBridge = true,
-    target = TARGET, positionStore, sessionProvider, playbackStore,
+    target = TARGET, positionStore, sessionProvider,
     controlsFactory = page => new OfficialPlayerControls(page), nativeProcessFactory = spawn }) {
     this.dataDir = dataDir; this.nativeScript = nativeScript; this.appData = appData;
     this.marker = path.join(temporary, 'EducoderSingleVideoAcceptance/bridge.json');
@@ -113,19 +98,12 @@ export class SingleController {
     this.busy = false; this.disposed = false; this.touched = false; this.sequence = Promise.resolve();
     this.saveFailureCleanupComplete = false;
     this.connectExistingBridge = connectExistingBridge && !positionStore && !sessionProvider;
-    this.playbackStore = playbackStore; this.controlsFactory = controlsFactory;
+    this.controlsFactory = controlsFactory;
     this.nativeProcessFactory = nativeProcessFactory;
-    this.playbackOptions = { ...defaultPlaybackOptions }; this.optionsError = false;
-    this.playerControls = null; this.controlCapabilities = { mute: false, rates: [] };
-    this.muteBaseline = null; this.speedConfirmed = false; this.optionsHint = '';
-    this.restoreSkipped = false; this.restoreHint = '';
+    this.playerControls = null;
   }
   async init() {
     await fs.mkdir(this.dataDir, { recursive: true });
-    if (this.playbackStore) {
-      try { this.playbackOptions = await this.playbackStore.get(); }
-      catch { this.optionsError = true; this.optionsHint = errors.PLAYBACK_OPTIONS_INVALID; }
-    }
     try {
       if (this.positionStore) {
         this.record = await this.positionStore.load(this.target);
@@ -265,68 +243,10 @@ export class SingleController {
     const media = await videos.evaluate(video => {
       const watched = document.body.innerText.match(/观看\s*(\d{2}:\d{2}:\d{2})\s*\/\s*(\d{2}:\d{2}:\d{2})/);
       return { currentTime: video.currentTime, duration: video.duration, paused: video.paused, ended: video.ended,
-        playbackRate: video.playbackRate, muted: video.muted, volume: video.volume, readyState: video.readyState, officialWatched: watched?.[1] ?? null,
+        playbackRate: video.playbackRate, readyState: video.readyState, officialWatched: watched?.[1] ?? null,
         officialTotal: watched?.[2] ?? null, mediaErrorCode: video.error?.code ?? null };
     });
     check(); return media;
-  }
-  async applyPlaybackOptions() {
-    if (!this.playbackStore || this.optionsError || !this.verifiedPlayer || this.checkpoint || this.recordError) return;
-    const check = () => { this.checkOperation(); this.assertPlayer(); };
-    check(); this.media = await this.readMedia(); check();
-    this.playerControls ??= this.controlsFactory(this.player);
-    this.controlCapabilities = { mute: await this.playerControls.muteAvailable(check), rates: await this.playerControls.rates(check) }; check();
-    const hints = [];
-    if (this.playbackOptions.autoMute) {
-      this.muteBaseline ??= { muted: this.media.muted, volume: this.media.volume };
-      try {
-        if (!this.controlCapabilities.mute && !this.media.muted) throw new Error('OFFICIAL_MUTE_UNAVAILABLE');
-        check(); await this.playerControls.setMuted(true, check); check();
-      } catch { check(); hints.push(errors.OFFICIAL_MUTE_UNAVAILABLE); }
-    } else if (this.muteBaseline) {
-      try {
-        if (this.media.muted === true && this.media.volume === this.muteBaseline.volume) {
-          check(); await this.playerControls.setMuted(this.muteBaseline.muted, check); check();
-          const restored = await this.readMedia();
-          if (restored.volume !== this.muteBaseline.volume) hints.push('静音选项已关闭；官网音量与原值不同，请在官方窗口确认音量。');
-        } else hints.push('静音选项已关闭，保留你在官网调整的声音状态。');
-        this.muteBaseline = null;
-      } catch { hints.push('静音选项已关闭，但官方声音控件暂不可用；请在官方窗口确认，原音量未强行修改。'); }
-    }
-    this.speedConfirmed = false;
-    const rate = this.playbackOptions.speedEnabled ? this.playbackOptions.speed : 1;
-    this.media = await this.readMedia();
-    if (this.controlCapabilities.rates.includes(rate)) {
-      try {
-        if (this.media.playbackRate !== rate) { check(); await this.playerControls.setRate(rate, check); check(); }
-        this.media = await this.readMedia();
-        this.speedConfirmed = this.media.playbackRate === rate;
-        if (!this.speedConfirmed) hints.push('官方没有保持所选速度；请查看官方播放器，不会反复强设倍速。');
-      } catch { check(); hints.push(errors.OFFICIAL_SPEED_UNAVAILABLE); }
-    } else if (this.playbackOptions.speedEnabled) hints.push('此视频未开放所选官方倍速；选项保留，当前按官网实际速度观看。');
-    else if (this.media.playbackRate !== 1) hints.push('倍速选项已关闭，但官方控件未能恢复 1 倍速；请先在官方页面改回 1 倍速。');
-    this.media = await this.readMedia();
-    this.setObservationRate(); this.optionsHint = hints.join(' ');
-  }
-  setObservationRate() {
-    const rate = this.media?.playbackRate;
-    this.ledger.allowOfficialRate(this.playbackOptions.speedEnabled && this.speedConfirmed
-      && rate === this.playbackOptions.speed && this.controlCapabilities.rates.includes(rate) ? rate : 1);
-  }
-  async changePlaybackOptions(patch) {
-    validatePlaybackPatch(patch);
-    if (!this.playbackStore || this.optionsError) throw new Error('PLAYBACK_OPTIONS_INVALID');
-    if (this.busy || this.disposed) throw new Error('OPTIONS_BUSY');
-    this.busy = true; this.actionError = null; this.message = ''; await this.ticking?.catch(() => {});
-    try {
-      this.playbackOptions = await this.playbackStore.set(patch);
-      if (this.verifiedPlayer && this.player && !this.player.isClosed()) await this.applyPlaybackOptions();
-      else this.optionsHint = '偏好已保存，打开所选视频后按官方可用控件应用；不会自动播放。';
-      this.message = this.optionsHint || '观看选项已保存并通过官方控件应用。';
-      await this.persist();
-    } catch (error) { this.actionError = playbackFailure(error).code; this.message = errorMessage(error); }
-    finally { this.busy = false; }
-    return this.status();
   }
   async setPlaying(playing) {
     this.assertPlayer();
@@ -337,16 +257,14 @@ export class SingleController {
       await this.playerControls.setPlaying(false); return;
     }
     this.checkOperation();
-    const attempt = { player: this.player, signal: this.operationSignal, phase: 'focus', cancelled: false,
+    const attempt = { player: this.player, phase: 'focus', cancelled: false,
       owned: !this.bridge && this.verifiedPlayer && this.player === this.ownedPlayer && this.media?.paused && !this.media.ended };
     this.pendingPlay = attempt;
     const check = () => {
       this.checkOperation();
-      if (attempt.cancelled) throw new Error('QUEUE_STOPPED');
+      if (attempt.cancelled) throw new Error('CLOSING');
       if (this.player !== attempt.player) throw new Error('PLAYER_CHANGED');
     };
-    const cancel = () => this.cancelPendingPlay(attempt);
-    attempt.signal?.addEventListener('abort', cancel, { once: true });
     try {
       check(); await attempt.player.bringToFront(); check(); this.assertPlayer();
       this.playerControls ??= this.controlsFactory(attempt.player);
@@ -360,7 +278,6 @@ export class SingleController {
     } catch (error) {
       check(); throw error;
     } finally {
-      attempt.signal?.removeEventListener('abort', cancel);
       await attempt.close?.catch(() => {});
       if (this.pendingPlay === attempt) this.pendingPlay = null;
     }
@@ -378,38 +295,30 @@ export class SingleController {
     attempt.close.catch(() => {});
   }
   requestStop() { this.operationCancelled = true; this.observationEpoch = (this.observationEpoch ?? 0) + 1; this.cancelPendingPlay(); }
-  checkOperation() { if (this.disposed || this.operationCancelled || this.operationSignal?.aborted) throw new Error('QUEUE_STOPPED'); }
+  checkOperation() { if (this.disposed || this.operationCancelled) throw new Error('CLOSING'); }
   async inspectPageRestrictions(page = this.player) {
     if (!page || page.isClosed()) throw new Error('OFFICIAL_WINDOW_CLOSED');
     let pathname;
     try { const url = new URL(page.url()); if (url.origin !== 'https://www.educoder.net') throw new Error('PLAYER_CHANGED'); pathname = url.pathname; }
     catch { throw new Error('PLAYER_CHANGED'); }
     const body = await page.locator('body').innerText({ timeout: 3000 });
-    if (/^\/(?:login|signin|users?\/login)(?:\/|$)/i.test(pathname) || /请先登录|登录已失效|重新登录/.test(body)) throw new Error('QUEUE_LOGIN_REQUIRED');
-    if (/请输入.*验证码|请完成.*(?:验证|校验|核验|认证)|需要.*(?:身份核验|人脸识别|实名认证)|拖动滑块|安全验证|账号验证|请.*(?:验证身份|进行验证|滑动拼图)/.test(body)) throw new Error('QUEUE_VERIFICATION');
-    if (/无权限|无观看权限|访问受限|禁止访问|限制.*(?:访问|播放)|课件已锁定|视频已锁定/.test(body)) throw new Error('QUEUE_PLATFORM_BLOCKED');
+    if (/^\/(?:login|signin|users?\/login)(?:\/|$)/i.test(pathname) || /请先登录|登录已失效|重新登录/.test(body)) throw new Error('LOGIN_REQUIRED');
+    if (/请输入.*验证码|请完成.*(?:验证|校验|核验|认证)|需要.*(?:身份核验|人脸识别|实名认证)|拖动滑块|安全验证|账号验证|请.*(?:验证身份|进行验证|滑动拼图)/.test(body)) throw new Error('VERIFICATION_REQUIRED');
+    if (/无权限|无观看权限|访问受限|禁止访问|限制.*(?:访问|播放)|课件已锁定|视频已锁定/.test(body)) throw new Error('PLATFORM_BLOCKED');
     return body;
   }
-  async inspectPersonalQueueSafety() {
+  async inspectPlaybackSafety() {
     await this.inspectPageRestrictions();
     this.assertPlayer();
     const pathname = new URL(this.player.url()).pathname;
     const body = await this.player.locator('body').innerText({ timeout: 3000 });
-    if (/^\/(?:login|signin|users?\/login)(?:\/|$)/i.test(pathname) || /请先登录|登录已失效|重新登录/.test(body)) throw new Error('QUEUE_LOGIN_REQUIRED');
-    if (/请输入.*验证码|请完成.*(?:验证|核验|认证)|需要.*(?:身份核验|人脸识别|实名认证)|拖动滑块|滑块验证|人机验证|请.*(?:验证身份|身份认证|活体检测)/.test(body)) throw new Error('QUEUE_VERIFICATION');
-    if (/无权访问|无观看权限|访问受限|禁止播放|不允许.*(?:连播|播放)|课件不存在|视频不存在/.test(body)) throw new Error('QUEUE_PLATFORM_BLOCKED');
-    if (this.checkpoint || /试题总数\s*[1-9]/.test(body) || !body.includes('暂无检查点')) throw new Error('QUEUE_CHECKPOINT');
+    if (/^\/(?:login|signin|users?\/login)(?:\/|$)/i.test(pathname) || /请先登录|登录已失效|重新登录/.test(body)) throw new Error('LOGIN_REQUIRED');
+    if (/请输入.*验证码|请完成.*(?:验证|核验|认证)|需要.*(?:身份核验|人脸识别|实名认证)|拖动滑块|滑块验证|人机验证|请.*(?:验证身份|身份认证|活体检测)/.test(body)) throw new Error('VERIFICATION_REQUIRED');
+    if (/无权访问|无观看权限|访问受限|禁止播放|不允许.*播放|课件不存在|视频不存在/.test(body)) throw new Error('PLATFORM_BLOCKED');
+    if (this.checkpoint || /试题总数\s*[1-9]/.test(body) || !body.includes('暂无检查点')) throw new Error('CHECKPOINT');
     const players=(this.context?.pages?.()??[]).filter(page=>{try{return !page.isClosed() && new URL(page.url()).origin==='https://www.educoder.net' && /video_info|videoInfo|\/Video\/Detail\//i.test(new URL(page.url()).pathname);}catch{return false;}});
-    if (players.length>1) throw new Error('QUEUE_OTHER_PLAYER');
+    if (players.length>1) throw new Error('OTHER_PLAYER');
     if (this.media?.mediaErrorCode) throw new Error(this.mediaFailureCode(this.media));
-  }
-  async inspectPlaybackSafety() {
-    try { await this.inspectPersonalQueueSafety(); }
-    catch (error) {
-      const mapping = { QUEUE_LOGIN_REQUIRED: 'LOGIN_REQUIRED', QUEUE_VERIFICATION: 'VERIFICATION_REQUIRED',
-        QUEUE_PLATFORM_BLOCKED: 'PLATFORM_BLOCKED', QUEUE_CHECKPOINT: 'CHECKPOINT', QUEUE_OTHER_PLAYER: 'OTHER_PLAYER' };
-      throw new Error(mapping[error.code ?? error.message] ?? error.code ?? error.message);
-    }
   }
   async openOfficial() {
     this.checkOperation();
@@ -424,12 +333,6 @@ export class SingleController {
       this.context = session.context;
       if (this.player && !this.player.isClosed()) { await this.player.bringToFront(); return; }
       if (this.page && !this.page.isClosed()) { await this.page.bringToFront(); return; }
-      const keepAlive = this.context[officialSessionKeepAlive];
-      delete this.context[officialSessionKeepAlive];
-      if (keepAlive && !keepAlive.isClosed()) {
-        this.page = keepAlive; await this.page.bringToFront(); this.checkOperation();
-        this.stage = 'official-open'; return;
-      }
       this.page = await this.context.newPage();
       try {
         this.checkOperation();
@@ -480,9 +383,9 @@ export class SingleController {
     let failed = false, ownedPlayer = null;
     const opened = this.page.waitForEvent('popup', { timeout: 45_000 }).then(async player => {
       ownedPlayer = player;
-      if (failed || this.disposed || this.operationCancelled || this.operationSignal?.aborted) {
+      if (failed || this.disposed || this.operationCancelled) {
         if (!player.isClosed()) await player.close().catch(() => {});
-        throw new Error('QUEUE_STOPPED');
+        throw new Error('CLOSING');
       }
       this.player = player; this.ownedPlayer = player; this.watchPlayerNetwork(player); return player;
     });
@@ -500,7 +403,7 @@ export class SingleController {
       this.checkOperation();
       const candidateUrl = new URL(this.player.url());
       if (candidateUrl.origin === 'https://www.educoder.net'
-        && /^\/(?:login|signin|users?\/login)(?:\/|$)/i.test(candidateUrl.pathname)) throw new Error('QUEUE_LOGIN_REQUIRED');
+        && /^\/(?:login|signin|users?\/login)(?:\/|$)/i.test(candidateUrl.pathname)) throw new Error('LOGIN_REQUIRED');
       if (resetPage(candidateUrl.href, this.target)) {
         await this.inspectPageRestrictions(this.player); this.checkOperation(); throw new Error('PAGE_RESET');
       }
@@ -533,10 +436,8 @@ export class SingleController {
       if (this.ledger.value.duration === 0) this.ledger.value.duration = this.media.duration;
       this.checkOperation(); this.verifiedPlayer = true; this.touched = false; this.stage = 'paused'; this.ledger.previous = null;
       this.readinessFailure = null;
-      this.playerControls = null; this.controlCapabilities = { mute: false, rates: [] };
+      this.playerControls = null;
       this.muteBaseline = null; this.speedConfirmed = false;
-      this.restoreSkipped = false; this.restoreHint = '';
-      await this.applyPlaybackOptions();
     } catch (error) {
       failed = true;
       if (this.playerNetworkWatch?.player === ownedPlayer) this.clearPlayerNetworkWatch();
@@ -548,26 +449,25 @@ export class SingleController {
   }
   async sample() {
     const epoch = this.observationEpoch;
-    const signal = this.operationSignal, initiallyAborted = signal?.aborted;
     const sampledPlayer = this.player;
     if (this.bridge) await this.syncBridge();
     else if (this.player && !this.player.isClosed()) {
       if (this.positionStore && !this.verifiedPlayer) {
-        // The periodic sampler may identify a reset before the queue poll.
+        // The periodic sampler may identify a reset before another user action.
         // Preserve that safe classification until re-identification succeeds;
         // first inspect the current URL so login/other-video changes still win.
         this.assertPlayer(); throw new Error(this.readinessFailure ?? 'PLAYER_CHANGED');
       }
       try {
         const sampled = await this.readMedia();
-        if (epoch !== this.observationEpoch || (!initiallyAborted && signal?.aborted)) throw new Error('QUEUE_STOPPED');
+        if (epoch !== this.observationEpoch) throw new Error('CLOSING');
         this.media = sampled;
       }
       catch (error) {
         this.ledger.previous = null;
-        if (playbackFailure(error).code !== 'QUEUE_STOPPED' && this.player === sampledPlayer) {
+        if (playbackFailure(error).code !== 'CLOSING' && this.player === sampledPlayer) {
           const failure = playbackFailure(error).code;
-          this.readinessFailure = recoverablePlaybackCodes.includes(failure) ? failure : null;
+          this.readinessFailure = readinessErrors.includes(failure) ? failure : null;
           this.media = null; this.stage = 'video-closed'; this.verifiedPlayer = false;
         }
         throw error;
@@ -588,13 +488,12 @@ export class SingleController {
       this.stage = this.media.ended ? 'ended' : this.media.paused ? 'paused' : 'playing';
       if (this.media.mediaErrorCode) this.message = errors.MEDIA_ERROR;
     } else if (this.player) { this.stage = 'video-closed'; this.media = null; }
-    this.setObservationRate();
     if (!this.recordError && !['not-open', 'video-closed', 'official-open'].includes(this.stage)) this.ledger.observe(this.media, Date.now());
   }
   async tick() {
     if (this.disposed) return;
     this.ticking = (async () => {
-      if (!this.busy && !this.recovering) { try { await this.sample(); await this.persist(); } catch (error) { this.message = errorMessage(error); } }
+      if (!this.busy) { try { await this.sample(); await this.persist(); } catch (error) { this.message = errorMessage(error); } }
     })();
     await this.ticking; this.ticking = null;
     if (!this.disposed) this.timer = setTimeout(() => this.tick(), 1000);
@@ -603,109 +502,22 @@ export class SingleController {
     const closed = page => !page || (typeof page.isClosed === 'function' && page.isClosed());
     return Boolean(this.saveFailureCleanupComplete && this.disposed && this.positionStore && !this.bridge
       && !this.busy && !this.pendingPlay && !this.ticking && closed(this.player) && closed(this.page)
-      && isPositionSaveIoError(this.persistError));
+      && positionSaveErrors.has(this.persistError?.code));
   }
   status() {
     const playBlockedReason = this.recordError ? this.recordErrorCode ?? 'RECORD_INVALID'
       : this.checkpoint ? 'CHECKPOINT' : this.media?.mediaErrorCode ? this.mediaFailureCode(this.media)
       : this.positionStore && !this.verifiedPlayer ? 'OPEN_FIRST'
-      : this.media && this.media.playbackRate !== 1 && !(this.playbackOptions.speedEnabled && this.speedConfirmed && this.media.playbackRate === this.playbackOptions.speed) ? 'NORMAL_SPEED' : null;
+      : this.media && this.media.playbackRate !== 1 ? 'NORMAL_SPEED' : null;
     return { target: this.target.title, classroomId: this.target.classroomId,
       page: this.target.page, index: this.target.index, courseTitle: this.courseTitle, stage: this.stage,
       media: this.media, percent: this.percent, resumeSeconds: Math.floor(this.ledger.value.position),
       confirmedWatchedSeconds: Math.floor(this.ledger.value.watchedPrefix), confirmedWatchedPrefix: this.ledger.value.watchedPrefix, busy: this.busy, message: this.message,
       restoreAvailable: !this.recordError && !this.checkpoint && this.ledger.value.position >= 1 && this.stage === 'paused',
       playAllowed: !playBlockedReason, playBlockedReason, manualMode: Boolean(this.sessionProvider),
-      playbackOptions: { ...this.playbackOptions }, optionsAvailable: Boolean(this.playbackStore), optionsError: this.optionsError,
-      controls: this.controlCapabilities, optionsHint: this.optionsHint,
-      restoreSkipped: this.restoreSkipped, restoreHint: this.restoreHint,
       officialFocusAvailable: Boolean(this.bridge || (this.player && !this.player.isClosed()) || (this.page && !this.page.isClosed())),
       discardAvailable: Boolean(this.recordError || this.canDiscardSaveFailure()), actionsAvailable: !this.disposed && !this.recordError,
       attachedExistingWindow: Boolean(this.bridge), actionError: this.actionError ?? null };
-  }
-  async prepareQueuePlayback({ fromBeginning = false, fromSaved = false, recovery = false, reopenClosedPlayer = false } = {}) {
-    this.checkOperation();
-    if (this.recordError) throw new Error(this.recordErrorCode ?? 'RECORD_INVALID');
-    this.queuePreparation = { fromBeginning, fromSaved };
-    if (this.player?.isClosed()) {
-      if (!reopenClosedPlayer || this.ownedPlayer !== this.player) throw new Error('OFFICIAL_WINDOW_CLOSED');
-      // This flag is a one-time snapshot supplied by an explicit user start.
-      // Automatic retries never receive it and cannot reopen a user-closed tab.
-      this.clearPlayerNetworkWatch(); this.player = this.ownedPlayer = null;
-      if (this.page?.isClosed()) this.page = null;
-      this.media = null; this.boundPlayerUrl = null; this.verifiedPlayer = false;
-      this.verifiedDuration = null; this.playerControls = null; this.ledger.previous = null;
-      this.touched = false; this.stage = 'video-closed';
-      this.controlCapabilities = { mute: false, rates: [] }; this.muteBaseline = null; this.speedConfirmed = false;
-    }
-    if (!this.status().media) {
-      const opened = await this.act('open'); this.checkOperation();
-      if (opened.actionError) throw new Error(opened.actionError);
-    }
-    await this.sample(); this.checkOperation();
-    await this.inspectPersonalQueueSafety(); this.checkOperation();
-    if (this.media?.ended || !this.media?.paused) return this.status();
-    const restore = (fromSaved || recovery) && this.ledger.value.position >= 1;
-    if (!restore && !fromBeginning && !fromSaved && !recovery) return this.status();
-    const prepared = await this.act(restore ? 'restore' : 'beginning'); this.checkOperation();
-    if (prepared.actionError) {
-      if (!restore || !restoreFallbackCodes.has(prepared.actionError)) throw new Error(prepared.actionError);
-      // A failed official restore is not a failed official play. Read everything
-      // again before allowing normal playback at its actual current position.
-      await this.sample(); this.checkOperation();
-      await this.inspectPersonalQueueSafety(); this.checkOperation();
-      if (!this.media?.paused || this.media.ended) throw new Error('PAUSE_FIRST');
-      this.restoreSkipped = true;
-      this.restoreHint = '官方位置恢复暂不可用，将从播放器当前真实位置正常播放；原保存位置保留。';
-      this.message = this.restoreHint; this.actionError = null;
-      this.ledger.previous = null;
-    } else { this.restoreSkipped = false; this.restoreHint = ''; }
-    return this.status();
-  }
-  async recoverQueuePlayback(error) {
-    this.recovering = true;
-    try {
-    this.checkOperation();
-    const failure = playbackFailure(error);
-    if (!recoverablePlaybackCodes.includes(failure.code)) throw error;
-    if (this.recordError || this.persistError) throw this.persistError ?? new Error(this.recordErrorCode ?? 'RECORD_INVALID');
-    const previousPlayer = this.player;
-    if (previousPlayer?.isClosed() || (!previousPlayer && this.page?.isClosed())) throw new Error('OFFICIAL_WINDOW_CLOSED');
-    let needsReopen = ['PAGE_RESET', 'PAGE_LOAD_FAILED', 'CDN_TIMEOUT', 'MEDIA_NETWORK_ERROR', 'MEDIA_DECODE_ERROR', 'MEDIA_NOT_READY'].includes(failure.code);
-    if (previousPlayer) {
-      if (this.ownedPlayer !== previousPlayer || this.bridge) throw new Error('PLAYER_CHANGED');
-      await this.inspectPageRestrictions(previousPlayer); this.checkOperation();
-      if (previousPlayer.url() !== this.boundPlayerUrl && !resetPage(previousPlayer.url(), this.target)) throw new Error('PLAYER_CHANGED');
-      if (previousPlayer.url() === this.boundPlayerUrl) {
-        const latest = await this.readMedia().catch(readError => {
-          if (playbackFailure(readError).code !== 'MEDIA_NOT_READY') throw readError;
-          return null;
-        });
-        if (latest?.mediaErrorCode && !recoverablePlaybackCodes.includes(this.mediaFailureCode(latest))) throw new Error(this.mediaFailureCode(latest));
-        if (this.verifiedPlayer && failure.code !== 'PAGE_RESET' && latest && !latest.mediaErrorCode
-          && Number.isFinite(latest.duration) && latest.duration > 0 && latest.readyState >= 2) needsReopen = false;
-      }
-      if (needsReopen) {
-        // Only the owned failed player closes. The official list/context stays
-        // alive; no saved position is captured from a reset or error page.
-        await this.persist(); this.checkOperation();
-        if (this.player !== previousPlayer || this.ownedPlayer !== previousPlayer) throw new Error('PLAYER_CHANGED');
-        await previousPlayer.close(); this.checkOperation();
-        this.clearPlayerNetworkWatch();
-        this.player = this.ownedPlayer = null; this.media = null; this.boundPlayerUrl = null;
-        this.verifiedPlayer = false; this.verifiedDuration = null; this.playerControls = null;
-        this.ledger.previous = null; this.touched = false; this.stage = 'video-closed';
-        this.controlCapabilities = { mute: false, rates: [] }; this.muteBaseline = null; this.speedConfirmed = false;
-      }
-    }
-    if (previousPlayer && !needsReopen) {
-      await this.sample(); this.checkOperation();
-      if (failure.code === 'OFFICIAL_PROGRESS_CONTROL_UNAVAILABLE') return this.prepareQueuePlayback(this.queuePreparation ?? { fromSaved: true });
-      return this.status();
-    }
-    const policy = this.queuePreparation ?? { fromSaved: true };
-    return await this.prepareQueuePlayback({ ...policy, recovery: needsReopen || !previousPlayer });
-    } finally { this.recovering = false; }
   }
   async act(action) {
     if (!['official', 'open', 'play', 'pause', 'close-video', 'restore', 'beginning', 'refresh'].includes(action)) throw new Error('INVALID_ACTION');
@@ -726,9 +538,7 @@ export class SingleController {
         if (this.media.mediaErrorCode) throw new Error('MEDIA_ERROR');
         if (this.checkpoint) throw new Error('CHECKPOINT');
         if (!this.bridge) await this.inspectPlaybackSafety();
-        await this.applyPlaybackOptions();
-        if (this.media.playbackRate !== 1 && !(this.playbackOptions.speedEnabled && this.speedConfirmed
-          && this.media.playbackRate === this.playbackOptions.speed)) throw new Error('NORMAL_SPEED');
+        if (this.media.playbackRate !== 1) throw new Error('NORMAL_SPEED');
         if (this.media.ended) throw new Error('ENDED');
         const before = this.media.currentTime;
         this.checkOperation(); if (this.bridge) await this.bridgeCommand('play');
@@ -798,7 +608,7 @@ export class SingleController {
     finally { this.busy = false; }
     return this.status();
   }
-  async dispose({ discardUnsavedPosition = false, preserveOfficialSession = false } = {}) {
+  async dispose({ discardUnsavedPosition = false } = {}) {
     this.saveFailureCleanupComplete = false;
     this.requestStop();
     this.disposed = true; clearTimeout(this.timer);
@@ -817,12 +627,10 @@ export class SingleController {
     }
     finally {
       this.clearPlayerNetworkWatch();
-      if (!this.bridge && this.ownsContext && !preserveOfficialSession) await this.context?.close();
+      if (!this.bridge && this.ownsContext) await this.context?.close();
       else if (!this.bridge) {
         if (this.player && !this.player.isClosed()) await this.player.close();
-        if (preserveOfficialSession && this.context && this.page && !this.page.isClosed()) {
-          this.context[officialSessionKeepAlive] = this.page; this.page = null;
-        } else if (this.page && !this.page.isClosed()) await this.page.close();
+        if (this.page && !this.page.isClosed()) await this.page.close();
       }
       const closed = page => !page || (typeof page.isClosed === 'function' && page.isClosed());
       this.saveFailureCleanupComplete = !this.bridge && !this.busy && !this.pendingPlay && !this.ticking

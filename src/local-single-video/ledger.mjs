@@ -43,20 +43,15 @@ export function importObservedEvents(events, current, target = TARGET) {
 export class ObservationLedger {
   constructor(value = freshLedger(), target = value.target) {
     this.value = validateLedger(value, target); this.previous = null;
-    this.observedRate = 1;
     this.ranges = this.value.watchedRanges ?? (this.value.watchedPrefix > 0 ? [[0, this.value.watchedPrefix]] : []);
-  }
-  allowOfficialRate(rate) {
-    if (![1, 1.5, 2].includes(rate)) throw new Error('OBSERVATION_RATE_INVALID');
-    if (this.observedRate !== rate) { this.observedRate = rate; this.previous = null; }
   }
   observe(media, wallMs) {
     const previous = this.previous;
     this.previous = media && Number.isFinite(media.currentTime) ? { ...media, wallMs } : null;
-    if (!this.previous || !previous || previous.paused || previous.playbackRate !== this.observedRate || media.playbackRate !== this.observedRate) return;
+    if (!this.previous || !previous || previous.paused || previous.playbackRate !== 1 || media.playbackRate !== 1) return;
     const elapsed = (wallMs - previous.wallMs) / 1000;
     const delta = media.currentTime - previous.currentTime;
-    if (elapsed < 0 || elapsed > 6 || delta < 0 || delta > elapsed * this.observedRate + 0.75
+    if (elapsed < 0 || elapsed > 6 || delta < 0 || delta > elapsed + 0.75
       || !Number.isFinite(media.duration) || previous.currentTime < 0
       || media.currentTime > media.duration) return;
     if (delta <= 0) return;
@@ -74,7 +69,7 @@ export class ObservationLedger {
     this.value.position = media.currentTime;
   }
   capture(media) {
-    if (media?.playbackRate === this.observedRate && Number.isFinite(media.currentTime)
+    if (media?.playbackRate === 1 && Number.isFinite(media.currentTime)
       && media.currentTime >= 0 && this.ranges.some(([start, end]) => media.currentTime >= start && media.currentTime <= end)) this.value.position = media.currentTime;
   }
   restorePosition() {
