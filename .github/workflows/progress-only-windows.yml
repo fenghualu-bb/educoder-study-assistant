@@ -23,6 +23,8 @@ jobs:
         run: |
           git config --global url.https://github.com/.insteadOf ssh://git@github.com/
           npm ci --no-audit --no-fund
+      - name: Test installer on Windows
+        run: node --test test/windows-installer.test.js
       - name: Test
         run: npm test -- --test-concurrency=2 --test-timeout=60000
       - name: Build Windows installer

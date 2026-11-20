@@ -11,10 +11,11 @@ const windowsTest = process.platform === 'win32' ? test : test.skip;
 async function run(file, args) {
   return new Promise((resolve, reject) => {
     const process = spawn(file, args, { windowsHide: true });
-    let stdout = '';
+    let stdout = '', stderr = '';
     process.stdout?.on('data', bytes => { stdout += bytes.toString('utf8'); });
+    process.stderr?.on('data', bytes => { stderr += bytes.toString('utf8'); });
     process.on('error', reject);
-    process.on('close', code => resolve({ code, stdout }));
+    process.on('close', code => resolve({ code, stdout, stderr }));
   });
 }
 before(async () => {
@@ -50,7 +51,8 @@ windowsTest('installer installs intact files and a real shortcut into Chinese pa
   const installDir = path.join(root, '中文 安装路径');
   const shortcutDir = path.join(root, '合成 桌面');
   await mkdir(shortcutDir);
-  assert.equal((await run(installer, ['--silent', '--install-dir', installDir, '--shortcut-dir', shortcutDir])).code, 0);
+  const installation = await run(installer, ['--silent', '--install-dir', installDir, '--shortcut-dir', shortcutDir]);
+  assert.equal(installation.code, 0, installation.stderr.trim());
   assert.equal(await readFile(path.join(installDir, 'resources', 'fixture.txt'), 'utf8'), 'synthetic fixture\n');
   assert.equal(await readFile(path.join(installDir, 'educoder-local-study-control.exe'), 'utf8'), 'synthetic app; never launch');
   const shortcuts = await readdir(shortcutDir);

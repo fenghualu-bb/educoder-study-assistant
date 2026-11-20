@@ -222,7 +222,8 @@ internal static class CandidateInstaller
         }
         catch (Exception error)
         {
-            if (!silent && !verify) MessageBox.Show(error is InvalidDataException ? error.Message : "无法完成安装，请联系维护者并保留安装包。", "安装未完成", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            if (silent || verify) Console.Error.WriteLine(error.GetType().Name + ": " + error.Message);
+            else MessageBox.Show(error is InvalidDataException ? error.Message : "无法完成安装，请联系维护者并保留安装包。", "安装未完成", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 2;
         }
     }
