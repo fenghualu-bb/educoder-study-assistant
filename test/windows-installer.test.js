@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, writeFile, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, readdir, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { buildWindowsInstaller } from '../scripts/build-windows-installer.mjs';
@@ -20,7 +20,7 @@ async function run(file, args) {
 }
 before(async () => {
   if (process.platform !== 'win32') return;
-  root = await mkdtemp(path.join(os.tmpdir(), 'educoder-installer-test-'));
+  root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'educoder-installer-test-'));
   payload = path.join(root, 'synthetic-package');
   await mkdir(path.join(payload, 'resources'), { recursive: true });
   await writeFile(path.join(payload, 'educoder-local-study-control.exe'), 'synthetic app; never launch');
@@ -30,7 +30,7 @@ before(async () => {
 });
 after(async () => {
   if (root) {
-    assert.equal(path.dirname(path.resolve(root)).toLowerCase(), path.resolve(os.tmpdir()).toLowerCase());
+    assert.equal(path.dirname(path.resolve(root)).toLowerCase(), (await realpath(os.tmpdir())).toLowerCase());
     assert.match(path.basename(root), /^educoder-installer-test-/);
     await rm(root, { recursive: true, force: true });
   }
@@ -62,7 +62,9 @@ windowsTest('installer installs intact files and a real shortcut into Chinese pa
   await writeFile(script, "param([string]$Path)\n[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()\n$shell=New-Object -ComObject WScript.Shell\n$link=$shell.CreateShortcut($Path)\n$link.TargetPath\n", 'utf8');
   const result = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', script, path.join(shortcutDir, shortcuts[0])]);
   assert.equal(result.code, 0);
-  assert.equal(result.stdout.trim().toLowerCase(), path.join(installDir, 'educoder-local-study-control.exe').toLowerCase());
+  assert.ok(result.stdout.trim(), 'The shortcut has no target');
+  const target = await realpath(result.stdout.trim());
+  assert.equal(target.toLowerCase(), path.join(installDir, 'educoder-local-study-control.exe').toLowerCase());
 });
 
 windowsTest('installer refuses an existing directory and preserves all its contents', async () => {

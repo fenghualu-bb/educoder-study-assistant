@@ -136,7 +136,10 @@ internal static class CandidateInstaller
             link.SetPath(Path.Combine(installDir, AppExe));
             link.SetWorkingDirectory(installDir);
             link.SetDescription("头歌学习进度助手");
-            ((IPersistFile)link).Save(temporary, false);
+            StringBuilder target = new StringBuilder(260);
+            link.GetPath(target, target.Capacity, IntPtr.Zero, 4); // SLGP_RAWPATH
+            if (target.Length == 0) throw new InvalidDataException("无法确认桌面快捷方式的目标。");
+            ((IPersistFile)link).Save(temporary, true);
             File.Move(temporary, Path.Combine(folder, ShortcutName));
         }
         finally
